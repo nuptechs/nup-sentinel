@@ -1,0 +1,170 @@
+// ─────────────────────────────────────────────
+// Sentinel SDK — Event Reporter
+// Sends captured events to the Sentinel server
+// ─────────────────────────────────────────────
+
+const DEFAULT_BATCH_SIZE = 50;
+const DEFAULT_FLUSH_INTERVAL = 3000; // 3s
+
+export class Reporter {
+  constructor({ serverUrl, projectId, sessionId = null, batchSize, flushInterval } = {}) {
+    if (!serverUrl) throw new Error('Reporter: serverUrl is required');
+    if (!projectId) throw new Error('Reporter: projectId is required');
+
+    this._serverUrl = serverUrl.replace(/\/$/, '');
+    this._projectId = projectId;
+    this._sessionId = sessionId;
+    this._batchSize = batchSize || DEFAULT_BATCH_SIZE;
+    this._flushInterval = flushInterval || DEFAULT_FLUSH_INTERVAL;
+    this._buffer = [];
+    this._timer = null;
+    this._flushing = false;
+  }
+
+  get sessionId() {
+    return this._sessionId;
+  }
+
+  /**
+   * Start a new QA session on the server.
+   */
+  async startSession({ userId, metadata } = {}) {
+    const res = await this._fetch('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: this._projectId,
+        userId: userId || 'anonymous',
+        userAgent: navigator.userAgent,
+        pageUrl: location.href,
+        metadata,
+      }),
+    });
+
+    this._sessionId = res.data.id;
+    this._startFlushTimer();
+    return res.data;
+  }
+
+  /**
+   * Queue events for batched sending.
+   */
+  push(events) {
+    const arr = Array.isArray(events) ? events : [events];
+    this._buffer.push(...arr);
+
+    if (this._buffer.length >= this._batchSize) {
+      this.flush();
+    }
+  }
+
+  /**
+   * Flush buffered events to the server.
+   */
+  async flush() {
+    if (this._flushing || this._buffer.length === 0 || !this._sessionId) return;
+
+    this._flushing = true;
+    const batch = this._buffer.splice(0, this._batchSize);
+
+    try {
+      await this._fetch(`/api/sessions/${this._sessionId}/events`, {
+        method: 'POST',
+        body: JSON.stringify({ events: batch }),
+      });
+    } catch (err) {
+      // Put events back at the front of the buffer for retry
+      this._buffer.unshift(...batch);
+      console.warn('[Sentinel] Failed to flush events:', err.message);
+    } finally {
+      this._flushing = false;
+    }
+  }
+
+  /**
+   * Submit a finding (annotation) to the server.
+   */
+  async reportFinding({ annotation, browserContext, type = 'bug', severity = 'medium', source = 'manual' }) {
+    if (!this._sessionId) throw new Error('Reporter: no active session');
+
+    const res = await this._fetch('/api/findings', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: this._sessionId,
+        projectId: this._projectId,
+        annotation,
+        browserContext,
+        type,
+        severity,
+        source,
+      }),
+    });
+
+    return res.data;
+  }
+
+  /**
+   * End the current session.
+   */
+  async endSession() {
+    await this.flush();
+    this._stopFlushTimer();
+
+    if (this._sessionId) {
+      await this._fetch(`/api/sessions/${this._sessionId}/complete`, {
+        method: 'POST',
+      });
+      this._sessionId = null;
+    }
+  }
+
+  /**
+   * Clean up — call on page unload.
+   */
+  destroy() {
+    this._stopFlushTimer();
+    // Use sendBeacon for remaining events
+    if (this._buffer.length > 0 && this._sessionId && navigator.sendBeacon) {
+      const blob = new Blob(
+        [JSON.stringify({ events: this._buffer })],
+        { type: 'application/json' }
+      );
+      navigator.sendBeacon(
+        `${this._serverUrl}/api/sessions/${this._sessionId}/events`,
+        blob
+      );
+      this._buffer = [];
+    }
+  }
+
+  // ── Private ───────────────────────────────
+
+  _startFlushTimer() {
+    this._stopFlushTimer();
+    this._timer = setInterval(() => this.flush(), this._flushInterval);
+  }
+
+  _stopFlushTimer() {
+    if (this._timer) {
+      clearInterval(this._timer);
+      this._timer = null;
+    }
+  }
+
+  async _fetch(path, options = {}) {
+    const res = await fetch(`${this._serverUrl}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Sentinel-SDK': 'browser/1.0',
+        ...options.headers,
+      },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error?.message || `HTTP ${res.status}`);
+    }
+
+    return res.json();
+  }
+}

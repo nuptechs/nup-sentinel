@@ -1,0 +1,124 @@
+// ─────────────────────────────────────────────
+// Sentinel — Core Service: DiagnosisService
+// Orchestrates: enrich finding → resolve code → AI diagnose
+// Depends ONLY on ports — zero external imports
+// ─────────────────────────────────────────────
+
+import { NotFoundError, IntegrationError } from '../errors.js';
+
+export class DiagnosisService {
+  /**
+   * @param {object} ports
+   * @param {import('../ports/storage.port.js').StoragePort}   ports.storage
+   * @param {import('../ports/trace.port.js').TracePort}       ports.trace
+   * @param {import('../ports/analyzer.port.js').AnalyzerPort} ports.analyzer
+   * @param {import('../ports/ai.port.js').AIPort}             ports.ai
+   * @param {import('../ports/notification.port.js').NotificationPort} [ports.notification]
+   */
+  constructor({ storage, trace, analyzer, ai, notification }) {
+    this.storage = storage;
+    this.trace = trace;
+    this.analyzer = analyzer;
+    this.ai = ai;
+    this.notification = notification || null;
+  }
+
+  /**
+   * Full diagnosis pipeline for a finding:
+   * 1. Enrich with backend traces (if TracePort configured)
+   * 2. Resolve code chain (if AnalyzerPort configured)
+   * 3. AI diagnosis
+   * 4. Notify
+   */
+  async diagnose(findingId) {
+    const finding = await this.storage.getFinding(findingId);
+    if (!finding) throw new NotFoundError(`Finding ${findingId} not found`);
+
+    // Step 1: Enrich with backend traces
+    if (this.trace?.isConfigured()) {
+      try {
+        const traces = await this.trace.getTraces(finding.sessionId, {
+          since: finding.createdAt,
+        });
+        finding.attachBackendContext({ traces });
+      } catch (err) {
+        console.warn(`[Sentinel] Trace enrichment failed for finding ${findingId}:`, err.message);
+      }
+    }
+
+    // Step 2: Resolve code via static analyzer
+    if (this.analyzer?.isConfigured() && finding.backendContext?.traces?.length) {
+      try {
+        const endpoints = this._extractEndpoints(finding.backendContext.traces);
+        const codeChains = [];
+
+        for (const ep of endpoints) {
+          const chain = await this.analyzer.resolveEndpoint(finding.projectId, ep.endpoint, ep.method);
+          if (chain) codeChains.push(chain);
+        }
+
+        if (codeChains.length > 0) {
+          finding.attachCodeContext({
+            endpoints: codeChains,
+            resolvedAt: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.warn(`[Sentinel] Code resolution failed for finding ${findingId}:`, err.message);
+      }
+    }
+
+    // Step 3: AI diagnosis
+    if (!this.ai?.isConfigured()) {
+      throw new IntegrationError('AI adapter not configured — cannot diagnose');
+    }
+
+    const sourceFiles = {};
+    if (finding.codeContext?.endpoints) {
+      for (const chain of finding.codeContext.endpoints) {
+        if (chain.sourceFiles) {
+          for (const file of chain.sourceFiles) {
+            try {
+              const content = await this.analyzer.getSourceFile(finding.projectId, file);
+              if (content) sourceFiles[file] = content;
+            } catch { /* skip unreadable files */ }
+          }
+        }
+      }
+    }
+
+    const diagnosis = await this.ai.diagnose({
+      finding: finding.toJSON(),
+      traces: finding.backendContext,
+      codeChain: finding.codeContext,
+      sourceFiles,
+    });
+
+    finding.diagnose(diagnosis);
+    await this.storage.updateFinding(finding);
+
+    // Step 4: Notify
+    if (this.notification?.isConfigured()) {
+      await this.notification.onDiagnosisReady(finding).catch(err =>
+        console.warn(`[Sentinel] Notification failed:`, err.message)
+      );
+    }
+
+    return finding;
+  }
+
+  _extractEndpoints(traces) {
+    const seen = new Set();
+    const endpoints = [];
+    for (const trace of traces) {
+      if (trace.type === 'http_request' && trace.payload?.path && trace.payload?.method) {
+        const key = `${trace.payload.method}:${trace.payload.path}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          endpoints.push({ endpoint: trace.payload.path, method: trace.payload.method });
+        }
+      }
+    }
+    return endpoints;
+  }
+}
