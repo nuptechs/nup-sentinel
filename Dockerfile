@@ -19,7 +19,4 @@ EXPOSE 3900
 ENV NODE_ENV=production
 ENV PORT=3900
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost:3900/health || exit 1
-
 CMD ["node", "src/server/index.js"]

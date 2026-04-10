@@ -2,6 +2,7 @@
 // Sentinel — Server entrypoint
 // ─────────────────────────────────────────────
 
+import express from 'express';
 import { createApp } from './app.js';
 import { initializeContainer, shutdownContainer, getContainer } from '../container.js';
 import { RetentionJob } from '../core/retention.js';
@@ -9,15 +10,25 @@ import { RetentionJob } from '../core/retention.js';
 const PORT = parseInt(process.env.PORT || '3900', 10);
 
 let retentionJob = null;
+let ready = false;
 
 async function main() {
   console.log('[Sentinel] Starting...');
+
+  // Start a minimal health server immediately so Railway healthcheck passes
+  const earlyApp = express();
+  earlyApp.get('/health', (_req, res) => {
+    res.json({ status: ready ? 'ok' : 'starting', timestamp: Date.now() });
+  });
+  let server = earlyApp.listen(PORT, () => {
+    console.log(`[Sentinel] Early health listener on port ${PORT}`);
+  });
 
   // Build and initialize the container (async — pg import, DB schema)
   await initializeContainer();
   const { services, adapters } = await getContainer();
 
-  // Create Express app
+  // Create the full Express app
   const app = createApp(services);
 
   // Start data retention cleanup (PostgreSQL only)
@@ -30,7 +41,10 @@ async function main() {
     retentionJob.start();
   }
 
-  const server = app.listen(PORT, () => {
+  // Replace early server with full app
+  await new Promise((resolve) => server.close(resolve));
+  server = app.listen(PORT, () => {
+    ready = true;
     console.log(`[Sentinel] Listening on http://localhost:${PORT}`);
     console.log(`[Sentinel] Health: http://localhost:${PORT}/health`);
   });
