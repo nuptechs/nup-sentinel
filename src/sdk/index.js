@@ -6,8 +6,9 @@
 import { Reporter } from './reporter.js';
 import { Recorder } from './recorder.js';
 import { Annotator } from './annotator.js';
+import { Annotator as AnnotatorV2 } from './annotator.v2.js';
 
-export { Reporter, Recorder, Annotator };
+export { Reporter, Recorder, Annotator, AnnotatorV2 };
 
 /**
  * Initialize Sentinel in one call.
@@ -35,6 +36,7 @@ export async function init({
   captureErrors = true,
   annotator = true,
   annotatorPosition = 'bottom-right',
+  annotatorVersion = 'v2',
   batchSize,
   flushInterval,
 } = {}) {
@@ -55,7 +57,8 @@ export async function init({
 
   let annotatorInstance = null;
   if (annotator) {
-    annotatorInstance = new Annotator({ reporter, position: annotatorPosition });
+    const AnnotatorClass = annotatorVersion === 'v2' ? AnnotatorV2 : Annotator;
+    annotatorInstance = new AnnotatorClass({ reporter, recorder, position: annotatorPosition, serverUrl });
     annotatorInstance.mount();
   }
 

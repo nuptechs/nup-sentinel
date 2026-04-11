@@ -83,7 +83,7 @@ export class Reporter {
   /**
    * Submit a finding (annotation) to the server.
    */
-  async reportFinding({ annotation, browserContext, type = 'bug', severity = 'medium', source = 'manual' }) {
+  async reportFinding({ annotation, browserContext, type = 'bug', severity = 'medium', source = 'manual', title }) {
     if (!this._sessionId) throw new Error('Reporter: no active session');
 
     const res = await this._fetch('/api/findings', {
@@ -96,9 +96,21 @@ export class Reporter {
         type,
         severity,
         source,
+        title,
       }),
     });
 
+    return res.data;
+  }
+
+  /**
+   * Ask the AI to suggest a title, type, and severity for a finding.
+   */
+  async suggestTitle({ description, element, pageUrl, browserContext } = {}) {
+    const res = await this._fetch('/api/findings/suggest-title', {
+      method: 'POST',
+      body: JSON.stringify({ description, element, pageUrl, browserContext }),
+    });
     return res.data;
   }
 

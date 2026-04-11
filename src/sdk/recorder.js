@@ -119,13 +119,15 @@ export class Recorder {
         });
         return res;
       } catch (err) {
+        const failurePayload = { phase: 'error', url, method, error: err.message, duration: Date.now() - start };
         this._reporter.push({
           type: 'network',
           source: 'fetch',
           timestamp: Date.now(),
           correlationId,
-          payload: { phase: 'error', url, method, error: err.message, duration: Date.now() - start },
+          payload: failurePayload,
         });
+        window.dispatchEvent(new CustomEvent('sentinel-network-failure', { detail: { type: 'network', payload: failurePayload } }));
         throw err;
       }
     };

@@ -41,6 +41,15 @@ export class AIPort {
     throw new Error('AIPort.clarify() not implemented');
   }
 
+  /**
+   * Generate a concise title and structured description from annotation context.
+   * @param {object} context - { description, screenshot, element, pageUrl, browserContext }
+   * @returns {Promise<{title: string, description: string, type: string, severity: string}>}
+   */
+  async suggestTitle(context) {
+    throw new Error('AIPort.suggestTitle() not implemented');
+  }
+
   isConfigured() {
     return false;
   }

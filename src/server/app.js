@@ -14,6 +14,7 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { createSessionRoutes } from './routes/sessions.js';
 import { createFindingRoutes } from './routes/findings.js';
 import { createProjectRoutes } from './routes/projects.js';
+import { MCPServer } from '../mcp/server.js';
 
 /**
  * Build the Express app with all middleware and routes.
@@ -53,6 +54,14 @@ export function createApp(services) {
   app.use('/api/sessions', createSessionRoutes(services));
   app.use('/api/findings', createFindingRoutes(services));
   app.use('/api/projects', createProjectRoutes(services));
+
+  // ── MCP Server (SSE transport) ──────────────
+  if (process.env.SENTINEL_MCP_ENABLED === 'true') {
+    const mcp = new MCPServer({ services, transport: 'sse' });
+    const sseHandler = mcp.createSSEHandler();
+    app.all('/mcp', apiKeyAuth, sseHandler);
+    console.log('[Sentinel] MCP SSE endpoint enabled at /mcp');
+  }
 
   // ── Error handling (must be last) ───────────
   app.use(notFoundHandler);

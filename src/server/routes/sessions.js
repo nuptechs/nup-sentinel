@@ -76,5 +76,19 @@ export function createSessionRoutes(services) {
     res.json({ success: true, data: session.toJSON() });
   }));
 
+  // GET /api/sessions/:id/replay — Get rrweb replay events for session
+  router.get('/:id/replay', asyncHandler(async (req, res) => {
+    const { limit = '10000' } = req.query;
+    await services.sessions.get(req.params.id); // verify exists
+    const events = await services.sessions.getEvents(req.params.id, {
+      type: 'dom',
+      limit: Math.min(parseInt(limit, 10) || 10000, 50000),
+    });
+    const rrwebEvents = events
+      .filter(e => e.source === 'rrweb')
+      .map(e => e.payload);
+    res.json({ success: true, data: { sessionId: req.params.id, events: rrwebEvents, count: rrwebEvents.length } });
+  }));
+
   return router;
 }

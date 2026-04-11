@@ -124,5 +124,20 @@ export function createFindingRoutes(services) {
     res.json({ success: true, data: finding.toJSON() });
   }));
 
+  // POST /api/findings/:id/push — Push finding to issue tracker
+  router.post('/:id/push', asyncHandler(async (req, res) => {
+    if (!services.integration) throw new ValidationError('Integration service not available');
+    const result = await services.integration.pushToTracker(req.params.id);
+    res.json({ success: true, data: result });
+  }));
+
+  // POST /api/findings/suggest-title — AI-powered title suggestion
+  router.post('/suggest-title', asyncHandler(async (req, res) => {
+    if (!services.integration) throw new ValidationError('Integration service not available');
+    const { description, screenshot, element, pageUrl, browserContext } = req.body;
+    const suggestion = await services.integration.suggestTitle({ description, screenshot, element, pageUrl, browserContext });
+    res.json({ success: true, data: suggestion });
+  }));
+
   return router;
 }

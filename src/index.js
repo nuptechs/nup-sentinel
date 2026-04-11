@@ -17,9 +17,13 @@ export { AnalyzerPort } from './core/ports/analyzer.port.js';
 export { AIPort } from './core/ports/ai.port.js';
 export { StoragePort } from './core/ports/storage.port.js';
 export { NotificationPort } from './core/ports/notification.port.js';
+export { IssueTrackerPort } from './core/ports/issue-tracker.port.js';
 
 // Errors
 export { SentinelError, ValidationError, NotFoundError, ConflictError, IntegrationError } from './core/errors.js';
 
 // Server
 export { createApp } from './server/app.js';
+
+// MCP
+export { MCPServer } from './mcp/server.js';

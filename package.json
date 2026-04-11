@@ -1,6 +1,6 @@
 {
   "name": "@nuptech/sentinel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "QA capture → diagnosis → correction pipeline with hexagonal architecture",
   "exports": {
@@ -8,12 +8,14 @@
     "./core/*": "./src/core/*.js",
     "./adapters/*": "./src/adapters/*.js",
     "./server": "./src/server/index.js",
-    "./sdk": "./src/sdk/index.js"
+    "./sdk": "./src/sdk/index.js",
+    "./mcp": "./src/mcp/server.js"
   },
   "scripts": {
     "dev": "node --watch src/server/index.js",
     "start": "node src/server/index.js",
     "test": "node --test tests/**/*.test.js",
+    "mcp": "node src/mcp/index.js",
     "lint": "eslint src/"
   },
   "engines": {

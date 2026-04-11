@@ -141,6 +141,31 @@ export class ClaudeAIAdapter extends AIPort {
     return !!(this.apiKey || process.env.ANTHROPIC_API_KEY);
   }
 
+  async suggestTitle(context) {
+    const client = await this._getClient();
+    const parts = [];
+    if (context.description) parts.push(`User description: ${context.description}`);
+    if (context.pageUrl) parts.push(`Page URL: ${context.pageUrl}`);
+    if (context.element) parts.push(`Selected element: <${context.element.tagName}${context.element.id ? '#' + context.element.id : ''}> text="${context.element.textContent?.slice(0, 200)}"`);
+    if (context.browserContext?.errors?.length) parts.push(`Recent errors: ${JSON.stringify(context.browserContext.errors.slice(0, 3))}`);
+    if (context.browserContext?.networkFailures?.length) parts.push(`Network failures: ${JSON.stringify(context.browserContext.networkFailures.slice(0, 3))}`);
+
+    const userMessage = parts.join('\n\n');
+    const response = await client.messages.create({
+      model: this.model, max_tokens: 512,
+      system: `You are Sentinel, a QA assistant. Given a user's bug description and context, generate:
+1. A concise title (max 80 chars) that describes the issue clearly
+2. A structured description in markdown with reproduction steps if inferrable
+3. The most likely type: bug|ux|visual|performance|data|other
+4. The suggested severity: critical|high|medium|low
+
+Respond ONLY in JSON: {"title":"...","description":"...","type":"...","severity":"..."}`,
+      messages: [{ role: 'user', content: userMessage }],
+    });
+    const text = response.content[0]?.text || '';
+    return this._parseJSON(text);
+  }
+
   // ── Private ───────────────────────────────
 
   async _getClient() {

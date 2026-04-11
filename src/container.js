@@ -13,11 +13,16 @@ import { NoopTraceAdapter } from './adapters/trace/noop.adapter.js';
 import { DebugProbeTraceAdapter } from './adapters/trace/debugprobe.adapter.js';
 import { WebhookNotificationAdapter } from './adapters/notification/webhook.adapter.js';
 import { NoopNotificationAdapter } from './adapters/notification/noop.adapter.js';
+import { GitHubIssueAdapter } from './adapters/issue-tracker/github.adapter.js';
+import { LinearIssueAdapter } from './adapters/issue-tracker/linear.adapter.js';
+import { JiraIssueAdapter } from './adapters/issue-tracker/jira.adapter.js';
+import { NoopIssueTrackerAdapter } from './adapters/issue-tracker/noop.adapter.js';
 
 import { SessionService } from './core/services/session.service.js';
 import { FindingService } from './core/services/finding.service.js';
 import { DiagnosisService } from './core/services/diagnosis.service.js';
 import { CorrectionService } from './core/services/correction.service.js';
+import { IntegrationService } from './core/services/integration.service.js';
 
 let _container = null;
 
@@ -84,6 +89,7 @@ async function buildAdapters() {
     analyzer: buildAnalyzer(),
     ai: buildAI(),
     notification: buildNotification(),
+    issueTracker: buildIssueTracker(),
   };
 }
 
@@ -102,6 +108,12 @@ function buildServices(adapters) {
       storage: adapters.storage,
       analyzer: adapters.analyzer,
       ai: adapters.ai,
+      notification: adapters.notification,
+    }),
+    integration: new IntegrationService({
+      storage: adapters.storage,
+      ai: adapters.ai,
+      issueTracker: adapters.issueTracker,
       notification: adapters.notification,
     }),
   };
@@ -200,4 +212,21 @@ function buildNotification() {
     });
   }
   return new NoopNotificationAdapter();
+}
+
+function buildIssueTracker() {
+  // Priority: GitHub > Linear > Jira (first configured wins)
+  if (process.env.SENTINEL_GITHUB_TOKEN && process.env.SENTINEL_GITHUB_REPO) {
+    console.log(`[Sentinel] IssueTracker: GitHub → ${process.env.SENTINEL_GITHUB_REPO}`);
+    return new GitHubIssueAdapter();
+  }
+  if (process.env.SENTINEL_LINEAR_API_KEY && process.env.SENTINEL_LINEAR_TEAM_ID) {
+    console.log('[Sentinel] IssueTracker: Linear');
+    return new LinearIssueAdapter();
+  }
+  if (process.env.SENTINEL_JIRA_URL && process.env.SENTINEL_JIRA_TOKEN) {
+    console.log(`[Sentinel] IssueTracker: Jira → ${process.env.SENTINEL_JIRA_URL}`);
+    return new JiraIssueAdapter();
+  }
+  return new NoopIssueTrackerAdapter();
 }
