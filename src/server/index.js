@@ -37,6 +37,10 @@ async function main() {
       pool: adapters.storage.pool,
       retentionDays: parseInt(process.env.SENTINEL_RETENTION_DAYS || '30', 10),
       eventRetentionDays: parseInt(process.env.SENTINEL_EVENT_RETENTION_DAYS || '14', 10),
+      traceRetentionDays: parseInt(
+        process.env.SENTINEL_TRACE_RETENTION_DAYS || process.env.SENTINEL_EVENT_RETENTION_DAYS || '14',
+        10,
+      ),
     });
     retentionJob.start();
   }

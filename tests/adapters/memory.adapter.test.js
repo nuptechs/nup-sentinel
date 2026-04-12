@@ -136,15 +136,65 @@ describe('MemoryStorageAdapter', () => {
     });
   });
 
+  describe('traces', () => {
+    it('stores and retrieves traces by session and correlation', async () => {
+      const now = Date.now();
+      await adapter.storeTrace({
+        correlationId: 'c1',
+        sessionId: 's1',
+        request: { method: 'GET', path: '/one' },
+        response: { statusCode: 200, durationMs: 12 },
+        queries: [{ sql: 'SELECT 1' }],
+        createdAt: now,
+      });
+      await adapter.storeTrace({
+        correlationId: 'c2',
+        sessionId: 's1',
+        request: { method: 'POST', path: '/two' },
+        response: { statusCode: 201, durationMs: 20 },
+        queries: [],
+        createdAt: now + 10,
+      });
+
+      const traces = await adapter.getTracesBySession('s1');
+      assert.equal(traces.length, 2);
+      assert.equal(traces[0].correlationId, 'c1');
+      assert.equal(traces[1].correlationId, 'c2');
+
+      const single = await adapter.getTraceByCorrelation('c2');
+      assert.equal(single.response.statusCode, 201);
+    });
+
+    it('filters and deletes old traces', async () => {
+      const oldTs = Date.now() - 10_000;
+      const newTs = Date.now();
+
+      await adapter.storeTrace({ correlationId: 'old', sessionId: 's', request: {}, response: {}, queries: [], createdAt: oldTs });
+      await adapter.storeTrace({ correlationId: 'new', sessionId: 's', request: {}, response: {}, queries: [], createdAt: newTs });
+
+      const filtered = await adapter.getTracesBySession('s', { since: newTs - 100 });
+      assert.equal(filtered.length, 1);
+      assert.equal(filtered[0].correlationId, 'new');
+
+      const deleted = await adapter.deleteTracesBefore(newTs - 100);
+      assert.equal(deleted, 1);
+      assert.equal(await adapter.getTraceByCorrelation('old'), null);
+      assert.ok(await adapter.getTraceByCorrelation('new'));
+    });
+  });
+
   describe('close', () => {
     it('clears all data', async () => {
       await adapter.createSession(new Session({ projectId: 'p' }));
       await adapter.createFinding(new Finding({ sessionId: 's', projectId: 'p', source: 'manual', type: 'bug', title: 'X' }));
+      await adapter.storeTrace({ correlationId: 'c1', sessionId: 's', request: {}, response: {}, queries: [], createdAt: Date.now() });
       await adapter.close();
 
       assert.equal(adapter.sessions.size, 0);
       assert.equal(adapter.findings.size, 0);
       assert.equal(adapter.events.length, 0);
+      assert.equal(adapter.traces.size, 0);
+      assert.equal(adapter.traceSessionIndex.size, 0);
     });
   });
 });

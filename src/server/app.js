@@ -2,10 +2,14 @@
 // Sentinel — Express Server
 // ─────────────────────────────────────────────
 
+import { randomUUID } from 'node:crypto';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { requestId } from './middleware/request-id.js';
 import { apiKeyAuth } from './middleware/api-key.js';
@@ -14,7 +18,101 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { createSessionRoutes } from './routes/sessions.js';
 import { createFindingRoutes } from './routes/findings.js';
 import { createProjectRoutes } from './routes/projects.js';
-import { MCPServer } from '../mcp/server.js';
+import { createSentinelMCP } from '../mcp/server.js';
+
+function sendMcpError(res, status, message, code = -32000) {
+  res.status(status).json({
+    jsonrpc: '2.0',
+    error: { code, message },
+    id: null,
+  });
+}
+
+function registerMcpRoutes(app, services) {
+  const streamableTransports = new Map();
+  const legacySseTransports = new Map();
+
+  app.all('/mcp', apiKeyAuth, async (req, res) => {
+    try {
+      const sessionId = req.get('mcp-session-id');
+      let transport = sessionId ? streamableTransports.get(sessionId) : null;
+
+      if (sessionId && transport && !(transport instanceof StreamableHTTPServerTransport)) {
+        sendMcpError(res, 400, 'Bad Request: Session exists but uses a different transport protocol');
+        return;
+      }
+
+      if (!transport) {
+        if (req.method !== 'POST' || !isInitializeRequest(req.body)) {
+          sendMcpError(res, 400, 'Bad Request: No valid session ID provided');
+          return;
+        }
+
+        transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (newSessionId) => {
+            streamableTransports.set(newSessionId, transport);
+          },
+        });
+
+        transport.onclose = () => {
+          const activeSessionId = transport.sessionId;
+          if (activeSessionId) {
+            streamableTransports.delete(activeSessionId);
+          }
+        };
+
+        const server = createSentinelMCP(services);
+        await server.connect(transport);
+      }
+
+      await transport.handleRequest(req, res, req.body);
+    } catch (error) {
+      console.error('[Sentinel] MCP Streamable HTTP error:', error);
+      if (!res.headersSent) {
+        sendMcpError(res, 500, 'Internal server error', -32603);
+      }
+    }
+  });
+
+  app.get('/sse', apiKeyAuth, async (req, res) => {
+    try {
+      const transport = new SSEServerTransport('/messages', res);
+      legacySseTransports.set(transport.sessionId, transport);
+
+      res.on('close', () => {
+        legacySseTransports.delete(transport.sessionId);
+      });
+
+      const server = createSentinelMCP(services);
+      await server.connect(transport);
+    } catch (error) {
+      console.error('[Sentinel] MCP legacy SSE error:', error);
+      if (!res.headersSent) {
+        sendMcpError(res, 500, 'Internal server error', -32603);
+      }
+    }
+  });
+
+  app.post('/messages', apiKeyAuth, async (req, res) => {
+    try {
+      const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : null;
+      const transport = sessionId ? legacySseTransports.get(sessionId) : null;
+
+      if (!transport || !(transport instanceof SSEServerTransport)) {
+        sendMcpError(res, 400, 'Bad Request: No transport found for the provided session');
+        return;
+      }
+
+      await transport.handlePostMessage(req, res, req.body);
+    } catch (error) {
+      console.error('[Sentinel] MCP legacy message error:', error);
+      if (!res.headersSent) {
+        sendMcpError(res, 500, 'Internal server error', -32603);
+      }
+    }
+  });
+}
 
 /**
  * Build the Express app with all middleware and routes.
@@ -28,8 +126,8 @@ export function createApp(services, adapters = null) {
   app.use(helmet());
   app.use(cors({
     origin: process.env.SENTINEL_CORS_ORIGIN || '*',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Sentinel-SDK', 'X-Sentinel-Key', 'X-Sentinel-Session', 'X-Sentinel-Correlation', 'X-Sentinel-Source'],
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Mcp-Session-Id', 'Last-Event-ID', 'X-Request-Id', 'X-Sentinel-SDK', 'X-Sentinel-Key', 'X-Sentinel-Session', 'X-Sentinel-Correlation', 'X-Sentinel-Source'],
   }));
   app.use(compression());
   app.use(express.json({ limit: '2mb' }));
@@ -127,12 +225,10 @@ export function createApp(services, adapters = null) {
   app.use('/api/findings', createFindingRoutes(services));
   app.use('/api/projects', createProjectRoutes(services));
 
-  // ── MCP Server (SSE transport) ──────────────
+  // ── MCP Server (Streamable HTTP + legacy SSE) ────
   if (process.env.SENTINEL_MCP_ENABLED === 'true') {
-    const mcp = new MCPServer({ services, transport: 'sse' });
-    const sseHandler = mcp.createSSEHandler();
-    app.all('/mcp', apiKeyAuth, sseHandler);
-    console.log('[Sentinel] MCP SSE endpoint enabled at /mcp');
+    registerMcpRoutes(app, services);
+    console.log('[Sentinel] MCP endpoints enabled at /mcp (Streamable HTTP) and /sse (legacy SSE)');
   }
 
   // ── Error handling (must be last) ───────────

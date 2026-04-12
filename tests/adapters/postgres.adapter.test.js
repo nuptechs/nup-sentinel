@@ -32,6 +32,7 @@ describe('PostgresStorageAdapter (real PG)', () => {
 
   after(async () => {
     // Clean up tables, then close pool
+    await pool.query('DROP TABLE IF EXISTS sentinel_traces CASCADE');
     await pool.query('DROP TABLE IF EXISTS sentinel_events CASCADE');
     await pool.query('DROP TABLE IF EXISTS sentinel_findings CASCADE');
     await pool.query('DROP TABLE IF EXISTS sentinel_sessions CASCADE');
@@ -40,7 +41,7 @@ describe('PostgresStorageAdapter (real PG)', () => {
 
   beforeEach(async () => {
     // Truncate between tests for isolation
-    await pool.query('TRUNCATE sentinel_events, sentinel_findings, sentinel_sessions CASCADE');
+    await pool.query('TRUNCATE sentinel_traces, sentinel_events, sentinel_findings, sentinel_sessions CASCADE');
   });
 
   // ── Schema Validation ─────────────────────
@@ -84,6 +85,20 @@ describe('PostgresStorageAdapter (real PG)', () => {
       assert.ok(cols.includes('browser_context'));
     });
 
+    it('created sentinel_traces table', async () => {
+      const { rows } = await pool.query(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_name = 'sentinel_traces' ORDER BY ordinal_position`
+      );
+      const cols = rows.map(r => r.column_name);
+      assert.ok(cols.includes('id'));
+      assert.ok(cols.includes('session_id'));
+      assert.ok(cols.includes('correlation_id'));
+      assert.ok(cols.includes('request'));
+      assert.ok(cols.includes('response'));
+      assert.ok(cols.includes('queries'));
+    });
+
     it('created indexes', async () => {
       const { rows } = await pool.query(
         `SELECT indexname FROM pg_indexes
@@ -95,6 +110,9 @@ describe('PostgresStorageAdapter (real PG)', () => {
       assert.ok(names.includes('idx_sentinel_events_correlation'));
       assert.ok(names.includes('idx_sentinel_findings_session'));
       assert.ok(names.includes('idx_sentinel_findings_project'));
+      assert.ok(names.includes('idx_sentinel_traces_correlation'));
+      assert.ok(names.includes('idx_sentinel_traces_session'));
+      assert.ok(names.includes('idx_sentinel_traces_created'));
     });
   });
 
@@ -299,6 +317,81 @@ describe('PostgresStorageAdapter (real PG)', () => {
       const findings = await adapter.listFindings(session.id);
       assert.equal(events.length, 0);
       assert.equal(findings.length, 0);
+    });
+  });
+
+  // ── Trace CRUD ────────────────────────────
+
+  describe('traces', () => {
+    it('stores and retrieves traces by session and correlation', async () => {
+      const session = new Session({ projectId: 'trace-pg' });
+      await adapter.createSession(session);
+
+      const now = Date.now();
+      await adapter.storeTrace({
+        sessionId: session.id,
+        correlationId: 'corr-1',
+        traceId: 'trace-1',
+        spanId: 'span-1',
+        request: { method: 'GET', path: '/trace', url: '/trace' },
+        response: { statusCode: 200, durationMs: 17 },
+        queries: [{ sql: 'SELECT 1', durationMs: 2.1 }],
+        createdAt: now,
+      });
+
+      const traces = await adapter.getTracesBySession(session.id);
+      assert.equal(traces.length, 1);
+      assert.equal(traces[0].correlationId, 'corr-1');
+      assert.equal(traces[0].traceId, 'trace-1');
+      assert.equal(traces[0].response.statusCode, 200);
+      assert.equal(traces[0].queries.length, 1);
+
+      const single = await adapter.getTraceByCorrelation('corr-1');
+      assert.equal(single.spanId, 'span-1');
+    });
+
+    it('upserts traces by correlation id', async () => {
+      const session = new Session({ projectId: 'trace-upsert' });
+      await adapter.createSession(session);
+
+      await adapter.storeTrace({
+        sessionId: session.id,
+        correlationId: 'corr-upsert',
+        request: { method: 'GET', path: '/first' },
+        response: null,
+        queries: [],
+        createdAt: Date.now(),
+      });
+
+      await adapter.storeTrace({
+        sessionId: session.id,
+        correlationId: 'corr-upsert',
+        request: { method: 'GET', path: '/first' },
+        response: { statusCode: 204, durationMs: 9 },
+        queries: [{ sql: 'SELECT now()' }],
+        createdAt: Date.now() + 1000,
+      });
+
+      const traces = await adapter.getTracesBySession(session.id);
+      assert.equal(traces.length, 1);
+      assert.equal(traces[0].response.statusCode, 204);
+      assert.equal(traces[0].queries.length, 1);
+    });
+
+    it('deletes traces older than a threshold', async () => {
+      const session = new Session({ projectId: 'trace-delete' });
+      await adapter.createSession(session);
+
+      const oldTs = Date.now() - 86_400_000;
+      const newTs = Date.now();
+
+      await adapter.storeTrace({ sessionId: session.id, correlationId: 'old-trace', request: {}, response: {}, queries: [], createdAt: oldTs });
+      await adapter.storeTrace({ sessionId: session.id, correlationId: 'new-trace', request: {}, response: {}, queries: [], createdAt: newTs });
+
+      const deleted = await adapter.deleteTracesBefore(newTs - 1000, 100);
+      assert.equal(deleted, 1);
+      assert.equal(await adapter.getTraceByCorrelation('old-trace'), null);
+      assert.ok(await adapter.getTraceByCorrelation('new-trace'));
     });
   });
 

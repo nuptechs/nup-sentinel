@@ -59,6 +59,24 @@ export class StoragePort {
     throw new Error('StoragePort.listFindingsByProject() not implemented');
   }
 
+  // ── Traces ─────────────────────────────────
+
+  async storeTrace(trace) {
+    throw new Error('StoragePort.storeTrace() not implemented');
+  }
+
+  async getTracesBySession(sessionId, options) {
+    throw new Error('StoragePort.getTracesBySession() not implemented');
+  }
+
+  async getTraceByCorrelation(correlationId) {
+    throw new Error('StoragePort.getTraceByCorrelation() not implemented');
+  }
+
+  async deleteTracesBefore(date, batchSize) {
+    throw new Error('StoragePort.deleteTracesBefore() not implemented');
+  }
+
   // ── Lifecycle ─────────────────────────────
 
   async initialize() {

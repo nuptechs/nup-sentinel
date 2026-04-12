@@ -68,6 +68,26 @@ const SCHEMA_SQL = `
     ON sentinel_findings (session_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_sentinel_findings_project
     ON sentinel_findings (project_id, status, created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS sentinel_traces (
+    id              BIGSERIAL PRIMARY KEY,
+    session_id      TEXT NOT NULL,
+    correlation_id  TEXT NOT NULL,
+    trace_id        TEXT,
+    span_id         TEXT,
+    request         JSONB,
+    response        JSONB,
+    queries         JSONB DEFAULT '[]',
+    duration_ms     DOUBLE PRECISION,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_sentinel_traces_correlation
+    ON sentinel_traces (correlation_id);
+  CREATE INDEX IF NOT EXISTS idx_sentinel_traces_session
+    ON sentinel_traces (session_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_sentinel_traces_created
+    ON sentinel_traces (created_at);
 `;
 
 export class PostgresStorageAdapter extends StoragePort {
@@ -287,6 +307,84 @@ export class PostgresStorageAdapter extends StoragePort {
     return rows.map(r => this._mapFinding(r));
   }
 
+  // ── Traces ────────────────────────────────
+
+  async storeTrace(trace) {
+    await this.pool.query(
+      `INSERT INTO sentinel_traces
+       (session_id, correlation_id, trace_id, span_id, request, response, queries, duration_ms, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (correlation_id) DO UPDATE SET
+         session_id = EXCLUDED.session_id,
+         trace_id = COALESCE(EXCLUDED.trace_id, sentinel_traces.trace_id),
+         span_id = COALESCE(EXCLUDED.span_id, sentinel_traces.span_id),
+         request = COALESCE(EXCLUDED.request, sentinel_traces.request),
+         response = COALESCE(EXCLUDED.response, sentinel_traces.response),
+         queries = EXCLUDED.queries,
+         duration_ms = EXCLUDED.duration_ms,
+         created_at = LEAST(sentinel_traces.created_at, EXCLUDED.created_at)`,
+      [
+        trace.sessionId,
+        trace.correlationId,
+        trace.traceId || null,
+        trace.spanId || null,
+        this._json(trace.request),
+        this._json(trace.response),
+        JSON.stringify(trace.queries || []),
+        trace.response?.durationMs ?? trace.durationMs ?? null,
+        trace.createdAt ? new Date(trace.createdAt) : new Date(),
+      ]
+    );
+  }
+
+  async getTracesBySession(sessionId, { since, until, limit = 500 } = {}) {
+    const conditions = ['session_id = $1'];
+    const params = [sessionId];
+    let idx = 2;
+
+    if (since) {
+      conditions.push(`created_at >= $${idx}`);
+      params.push(new Date(since));
+      idx++;
+    }
+    if (until) {
+      conditions.push(`created_at <= $${idx}`);
+      params.push(new Date(until));
+      idx++;
+    }
+
+    params.push(limit);
+    const { rows } = await this.pool.query(
+      `SELECT * FROM sentinel_traces
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY created_at ASC
+       LIMIT $${idx}`,
+      params
+    );
+    return rows.map(r => this._mapTrace(r));
+  }
+
+  async getTraceByCorrelation(correlationId) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM sentinel_traces WHERE correlation_id = $1`,
+      [correlationId]
+    );
+    return rows[0] ? this._mapTrace(rows[0]) : null;
+  }
+
+  async deleteTracesBefore(date, batchSize = 500) {
+    const result = await this.pool.query(
+      `DELETE FROM sentinel_traces
+       WHERE id IN (
+         SELECT id FROM sentinel_traces
+         WHERE created_at < $1
+         LIMIT $2
+       )`,
+      [new Date(date), batchSize]
+    );
+    return result.rowCount || 0;
+  }
+
   // ── Lifecycle ─────────────────────────────
 
   async initialize() {
@@ -357,5 +455,19 @@ export class PostgresStorageAdapter extends StoragePort {
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
     });
+  }
+
+  _mapTrace(row) {
+    return {
+      correlationId: row.correlation_id,
+      sessionId: row.session_id,
+      traceId: row.trace_id || null,
+      spanId: row.span_id || null,
+      request: row.request || null,
+      response: row.response || null,
+      queries: row.queries || [],
+      durationMs: row.duration_ms != null ? Number(row.duration_ms) : null,
+      createdAt: new Date(row.created_at).getTime(),
+    };
   }
 }

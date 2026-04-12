@@ -83,9 +83,10 @@ export async function shutdownContainer() {
 // ── Builder functions ─────────────────────────
 
 async function buildAdapters() {
+  const storage = await buildStorage();
   return {
-    storage: await buildStorage(),
-    trace: buildTrace(),
+    storage,
+    trace: buildTrace(storage),
     analyzer: buildAnalyzer(),
     ai: buildAI(),
     notification: buildNotification(),
@@ -162,7 +163,7 @@ async function buildStorage() {
   return new MemoryStorageAdapter();
 }
 
-function buildTrace() {
+function buildTrace(storage) {
   const traceMode = process.env.SENTINEL_TRACE;
   const traceBaseUrl = process.env.SENTINEL_TRACE_URL || process.env.DEBUG_PROBE_URL || process.env.PROBE_SERVER_URL || null;
 
@@ -173,6 +174,7 @@ function buildTrace() {
       maxTraces,
       baseUrl: traceBaseUrl,
       apiKey: process.env.SENTINEL_TRACE_API_KEY || process.env.PROBE_API_KEY || null,
+      storage,
     });
   }
   return new NoopTraceAdapter();

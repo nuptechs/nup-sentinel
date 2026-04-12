@@ -14,6 +14,8 @@ export class MemoryStorageAdapter extends StoragePort {
     this.sessions = new Map();
     this.events = [];
     this.findings = new Map();
+    this.traces = new Map();           // Map<correlationId, trace>
+    this.traceSessionIndex = new Map(); // Map<sessionId, Set<correlationId>>
   }
 
   async createSession(session) {
@@ -92,12 +94,73 @@ export class MemoryStorageAdapter extends StoragePort {
     return results.slice(offset, offset + limit).map(r => new Finding(r));
   }
 
+  // ── Traces ────────────────────────────────
+
+  async storeTrace(trace) {
+    const entry = structuredClone(trace);
+    this.traces.set(trace.correlationId, entry);
+
+    if (trace.sessionId) {
+      if (!this.traceSessionIndex.has(trace.sessionId)) {
+        this.traceSessionIndex.set(trace.sessionId, new Set());
+      }
+      this.traceSessionIndex.get(trace.sessionId).add(trace.correlationId);
+    }
+  }
+
+  async getTracesBySession(sessionId, { since, until, limit = 500 } = {}) {
+    const correlationIds = this.traceSessionIndex.get(sessionId);
+    if (!correlationIds) return [];
+
+    let results = [];
+    for (const cid of correlationIds) {
+      const trace = this.traces.get(cid);
+      if (!trace) continue;
+      if (since && trace.createdAt < since) continue;
+      if (until && trace.createdAt > until) continue;
+      results.push(structuredClone(trace));
+    }
+
+    results.sort((a, b) => a.createdAt - b.createdAt);
+    return results.slice(0, limit);
+  }
+
+  async getTraceByCorrelation(correlationId) {
+    const trace = this.traces.get(correlationId);
+    return trace ? structuredClone(trace) : null;
+  }
+
+  async deleteTracesBefore(date, batchSize = 500) {
+    const threshold = typeof date === 'number' ? date : new Date(date).getTime();
+    let deleted = 0;
+
+    for (const [cid, trace] of this.traces) {
+      if (deleted >= batchSize) break;
+      const ts = typeof trace.createdAt === 'number' ? trace.createdAt : new Date(trace.createdAt).getTime();
+      if (ts < threshold) {
+        // Remove from session index
+        if (trace.sessionId) {
+          const sessionSet = this.traceSessionIndex.get(trace.sessionId);
+          if (sessionSet) {
+            sessionSet.delete(cid);
+            if (sessionSet.size === 0) this.traceSessionIndex.delete(trace.sessionId);
+          }
+        }
+        this.traces.delete(cid);
+        deleted++;
+      }
+    }
+    return deleted;
+  }
+
   async initialize() { /* noop */ }
 
   async close() {
     this.sessions.clear();
     this.events = [];
     this.findings.clear();
+    this.traces.clear();
+    this.traceSessionIndex.clear();
   }
 
   isConfigured() {

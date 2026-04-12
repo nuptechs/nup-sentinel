@@ -8,6 +8,7 @@
  * RetentionJob runs on a configurable interval and removes:
  *   - Completed/expired sessions older than retentionDays
  *   - Events older than eventRetentionDays (may differ from session retention)
+ *   - Durable traces older than traceRetentionDays
  *   - Dismissed findings older than retentionDays
  *
  * CASCADE on sentinel_events means deleting a session removes its events.
@@ -24,7 +25,8 @@ export class RetentionJob {
    * @param {object} options
    * @param {import('pg').Pool} options.pool
    * @param {number} [options.retentionDays=30] — days to keep completed sessions
-   * @param {number} [options.eventRetentionDays=14] — days to keep orphan events
+   * @param {number} [options.eventRetentionDays=14] — days to keep old events
+   * @param {number} [options.traceRetentionDays=14] — days to keep durable traces
    * @param {number} [options.intervalMs=3600000] — cleanup interval (default: 1h)
    * @param {number} [options.batchSize=500] — max rows to delete per batch
    */
@@ -32,12 +34,14 @@ export class RetentionJob {
     pool,
     retentionDays = 30,
     eventRetentionDays = 14,
+    traceRetentionDays = eventRetentionDays,
     intervalMs = 60 * 60 * 1000,
     batchSize = 500,
   }) {
     this.pool = pool;
     this.retentionDays = retentionDays;
     this.eventRetentionDays = eventRetentionDays;
+    this.traceRetentionDays = traceRetentionDays;
     this.intervalMs = intervalMs;
     this.batchSize = batchSize;
     this._timer = null;
@@ -55,7 +59,7 @@ export class RetentionJob {
     setTimeout(() => this.run(), 10_000);
 
     this._timer = setInterval(() => this.run(), this.intervalMs);
-    console.log(`[Sentinel] Retention job started: sessions=${this.retentionDays}d, events=${this.eventRetentionDays}d, interval=${this.intervalMs / 1000}s`);
+    console.log(`[Sentinel] Retention job started: sessions=${this.retentionDays}d, events=${this.eventRetentionDays}d, traces=${this.traceRetentionDays}d, interval=${this.intervalMs / 1000}s`);
   }
 
   /** Stop the cleanup timer. */
@@ -74,7 +78,7 @@ export class RetentionJob {
     if (this._running) return; // prevent overlap
     this._running = true;
 
-    const stats = { sessions: 0, events: 0, findings: 0 };
+    const stats = { sessions: 0, events: 0, traces: 0, findings: 0 };
 
     try {
       // 1. Delete old completed/expired sessions (CASCADE deletes their events + findings)
@@ -102,7 +106,19 @@ export class RetentionJob {
       );
       stats.events = eventResult.rowCount || 0;
 
-      // 3. Delete old dismissed findings
+      // 3. Delete old durable traces
+      const traceResult = await this.pool.query(
+        `DELETE FROM sentinel_traces
+         WHERE id IN (
+           SELECT id FROM sentinel_traces
+           WHERE created_at < NOW() - $1::interval
+           LIMIT $2
+         )`,
+        [`${this.traceRetentionDays} days`, this.batchSize]
+      );
+      stats.traces = traceResult.rowCount || 0;
+
+      // 4. Delete old dismissed findings
       const findingResult = await this.pool.query(
         `DELETE FROM sentinel_findings
          WHERE id IN (
@@ -115,8 +131,8 @@ export class RetentionJob {
       );
       stats.findings = findingResult.rowCount || 0;
 
-      if (stats.sessions > 0 || stats.events > 0 || stats.findings > 0) {
-        console.log(`[Sentinel] Retention cleanup: ${stats.sessions} sessions, ${stats.events} events, ${stats.findings} findings removed`);
+      if (stats.sessions > 0 || stats.events > 0 || stats.traces > 0 || stats.findings > 0) {
+        console.log(`[Sentinel] Retention cleanup: ${stats.sessions} sessions, ${stats.events} events, ${stats.traces} traces, ${stats.findings} findings removed`);
       }
     } catch (err) {
       console.error('[Sentinel] Retention cleanup error:', err.message);

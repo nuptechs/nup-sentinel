@@ -17,19 +17,25 @@ import { CorrectionService } from '../../src/core/services/correction.service.js
 
 // ── Helpers ─────────────────────────────────
 
-function makeRequest(server, method, path, body = null) {
+function makeRequest(server, method, path, body = null, headers = {}) {
   const addr = server.address();
   const url = `http://127.0.0.1:${addr.port}${path}`;
 
   return new Promise((resolve, reject) => {
-    const req = http.request(url, { method, headers: { 'Content-Type': 'application/json' } }, (res) => {
+    const req = http.request(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+    }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try {
-          resolve({ status: res.statusCode, body: JSON.parse(data) });
+          resolve({ status: res.statusCode, headers: res.headers, body: JSON.parse(data) });
         } catch {
-          resolve({ status: res.statusCode, body: data });
+          resolve({ status: res.statusCode, headers: res.headers, body: data });
         }
       });
     });
@@ -70,8 +76,12 @@ const noopNotification = {
 describe('HTTP API', () => {
   let server;
   let storage;
+  let previousMcpEnabled;
 
   before(async () => {
+    previousMcpEnabled = process.env.SENTINEL_MCP_ENABLED;
+    process.env.SENTINEL_MCP_ENABLED = 'true';
+
     storage = new MemoryStorageAdapter();
     await storage.initialize();
 
@@ -100,6 +110,12 @@ describe('HTTP API', () => {
   after(async () => {
     await new Promise(resolve => server.close(resolve));
     await storage.close();
+
+    if (previousMcpEnabled === undefined) {
+      delete process.env.SENTINEL_MCP_ENABLED;
+    } else {
+      process.env.SENTINEL_MCP_ENABLED = previousMcpEnabled;
+    }
   });
 
   beforeEach(async () => {
@@ -117,6 +133,38 @@ describe('HTTP API', () => {
       assert.equal(res.status, 200);
       assert.equal(res.body.status, 'ok');
       assert.ok(res.body.timestamp);
+    });
+  });
+
+  describe('POST /mcp', () => {
+    it('initializes the official MCP Streamable HTTP endpoint', async () => {
+      const res = await makeRequest(
+        server,
+        'POST',
+        '/mcp',
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-11-25',
+            capabilities: {},
+            clientInfo: { name: 'api-test-client', version: '1.0.0' },
+          },
+        },
+        {
+          Accept: 'application/json, text/event-stream',
+        },
+      );
+
+      const payload = typeof res.body === 'string'
+        ? JSON.parse(res.body.match(/data:\s*(\{[\s\S]*\})/)?.[1] || '{}')
+        : res.body;
+
+      assert.equal(res.status, 200);
+      assert.equal(payload.result?.serverInfo?.name, 'sentinel-mcp');
+      assert.ok(res.headers['mcp-session-id']);
+      assert.match(String(res.headers['content-type'] || ''), /application\/json|text\/event-stream/);
     });
   });
 

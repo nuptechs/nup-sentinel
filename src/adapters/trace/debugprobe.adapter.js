@@ -29,6 +29,7 @@ export class DebugProbeTraceAdapter extends TracePort {
    * @param {string} [options.baseUrl]
    * @param {string} [options.apiKey]
    * @param {number} [options.timeoutMs=5000]
+   * @param {import('../../core/ports/storage.port.js').StoragePort} [options.storage] — durable persistence (write-through)
    */
   constructor({
     maxTraces = 10_000,
@@ -36,6 +37,7 @@ export class DebugProbeTraceAdapter extends TracePort {
     baseUrl = process.env.SENTINEL_TRACE_URL || process.env.DEBUG_PROBE_URL || process.env.PROBE_SERVER_URL || null,
     apiKey = process.env.SENTINEL_TRACE_API_KEY || process.env.PROBE_API_KEY || null,
     timeoutMs = 5000,
+    storage = null,
   } = {}) {
     super();
     this.maxTraces = maxTraces;
@@ -43,6 +45,7 @@ export class DebugProbeTraceAdapter extends TracePort {
     this.baseUrl = baseUrl ? baseUrl.replace(/\/$/, '') : null;
     this.apiKey = apiKey || null;
     this.timeoutMs = timeoutMs;
+    this._storage = storage;
 
     // Primary store: Map<correlationId, TraceEntry>
     this.traces = new Map();
@@ -88,27 +91,60 @@ export class DebugProbeTraceAdapter extends TracePort {
       }
     }
 
-    // Local in-memory store
-    const correlationIds = this.sessionIndex.get(sessionId);
-    if (!correlationIds) return [];
+    const merged = new Map();
 
-    let results = [];
-    for (const cid of correlationIds) {
-      const trace = this.traces.get(cid);
-      if (!trace) continue;
-      if (fromTime && trace.createdAt < fromTime) continue;
-      if (toTime && trace.createdAt > toTime) continue;
-      results.push(this._formatTrace(trace));
+    // Durable store (PostgreSQL) — historical traces survive restarts.
+    // We merge persisted + in-memory traces so fresh hot-cache entries are
+    // never hidden by eventual/asynchronous persistence writes.
+    if (this._storage) {
+      try {
+        const persisted = await this._storage.getTracesBySession(sessionId, {
+          since: fromTime, until: toTime, limit,
+        });
+        for (const trace of persisted) {
+          const formatted = this._formatTrace(trace);
+          merged.set(formatted.correlationId, formatted);
+        }
+      } catch (err) {
+        console.warn('[Sentinel] Trace persistence read failed:', err.message);
+      }
     }
 
-    results.sort((a, b) => a.timestamp - b.timestamp);
+    // Local in-memory store (hot cache)
+    const correlationIds = this.sessionIndex.get(sessionId);
+    if (correlationIds) {
+      for (const cid of correlationIds) {
+        const trace = this.traces.get(cid);
+        if (!trace) continue;
+        if (fromTime && trace.createdAt < fromTime) continue;
+        if (toTime && trace.createdAt > toTime) continue;
+        const formatted = this._formatTrace(trace);
+        merged.set(formatted.correlationId, formatted);
+      }
+    }
+
+    const results = [...merged.values()]
+      .sort((a, b) => a.timestamp - b.timestamp);
+
     return results.slice(0, limit);
   }
 
   async getTraceByCorrelation(correlationId) {
+    // Fast path: in-memory cache
     const trace = this.traces.get(correlationId);
-    if (!trace) return null;
-    return this._formatTrace(trace);
+    if (trace) return this._formatTrace(trace);
+
+    // Slow path: durable store
+    if (this._storage) {
+      try {
+        const persisted = await this._storage.getTraceByCorrelation(correlationId);
+        if (persisted) return this._formatTrace(persisted);
+      } catch (err) {
+        console.warn('[Sentinel] Trace persistence read failed:', err.message);
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -385,6 +421,7 @@ export class DebugProbeTraceAdapter extends TracePort {
   // ── Internal: storage ─────────────────────
 
   _store(entry) {
+    // In-memory cache (fast reads)
     this.traces.set(entry.correlationId, entry);
 
     if (entry.sessionId) {
@@ -392,6 +429,13 @@ export class DebugProbeTraceAdapter extends TracePort {
         this.sessionIndex.set(entry.sessionId, new Set());
       }
       this.sessionIndex.get(entry.sessionId).add(entry.correlationId);
+    }
+
+    // Write-through to durable store (non-blocking)
+    if (this._storage) {
+      this._storage.storeTrace(entry).catch((err) => {
+        console.warn('[Sentinel] Trace persistence write failed:', err.message);
+      });
     }
 
     // LRU eviction — remove oldest when over capacity

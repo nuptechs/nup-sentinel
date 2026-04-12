@@ -237,6 +237,69 @@ describe('DebugProbeTraceAdapter', () => {
     });
   });
 
+  describe('durable persistence', () => {
+    it('writes captured traces through to durable storage', async () => {
+      const persisted = [];
+      const durableStorage = {
+        async storeTrace(trace) {
+          persisted.push(structuredClone(trace));
+        },
+        async getTracesBySession() { return []; },
+        async getTraceByCorrelation() { return null; },
+      };
+
+      const durableAdapter = new DebugProbeTraceAdapter({ maxTraces: 100, storage: durableStorage });
+      const middleware = durableAdapter.createMiddleware();
+      const req = {
+        method: 'GET', path: '/persist', originalUrl: '/persist',
+        ip: '127.0.0.1', query: {}, body: null,
+        headers: { 'x-sentinel-session': 'sess-persist', 'x-sentinel-correlation': 'corr-persist' },
+        get: (name) => req.headers[name.toLowerCase()],
+      };
+      const res = { statusCode: 202, _headers: {}, getHeaders: () => ({}), setHeader: () => {}, end: () => {} };
+
+      middleware(req, res, () => {});
+      res.end();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.equal(persisted.length, 1);
+      assert.equal(persisted[0].sessionId, 'sess-persist');
+      assert.equal(persisted[0].correlationId, 'corr-persist');
+      assert.equal(persisted[0].response.statusCode, 202);
+    });
+
+    it('merges durable traces with the in-memory hot cache', async () => {
+      const durableStorage = {
+        async storeTrace() {},
+        async getTracesBySession() {
+          return [{
+            correlationId: 'db-1',
+            sessionId: 'sess-merge',
+            request: { method: 'GET', path: '/from-db', url: '/from-db' },
+            response: { statusCode: 200, durationMs: 5 },
+            queries: [],
+            createdAt: 1,
+          }];
+        },
+        async getTraceByCorrelation() { return null; },
+      };
+
+      const durableAdapter = new DebugProbeTraceAdapter({ maxTraces: 100, storage: durableStorage });
+      durableAdapter._store({
+        correlationId: 'mem-1',
+        sessionId: 'sess-merge',
+        request: { method: 'POST', path: '/from-memory', url: '/from-memory' },
+        response: { statusCode: 201, durationMs: 8 },
+        queries: [],
+        createdAt: 2,
+      });
+
+      const traces = await durableAdapter.getTraces('sess-merge');
+      assert.equal(traces.length, 2);
+      assert.deepEqual(traces.map((t) => t.correlationId), ['db-1', 'mem-1']);
+    });
+  });
+
   describe('clear', () => {
     it('removes all traces', async () => {
       adapter._store({

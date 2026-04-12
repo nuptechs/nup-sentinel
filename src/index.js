@@ -26,4 +26,4 @@ export { SentinelError, ValidationError, NotFoundError, ConflictError, Integrati
 export { createApp } from './server/app.js';
 
 // MCP
-export { MCPServer } from './mcp/server.js';
+export { MCPServer, createSentinelMCP } from './mcp/server.js';
