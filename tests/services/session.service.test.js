@@ -130,4 +130,41 @@ describe('SessionService', () => {
       assert.equal(listB.length, 1);
     });
   });
+
+  describe('getOrCreate', () => {
+    it('returns existing session when it exists', async () => {
+      const existing = await service.create({ projectId: 'proj-1', userId: 'user-1' });
+      const result = await service.getOrCreate(existing.id, { projectId: 'proj-1', source: 'test' });
+      assert.equal(result.id, existing.id);
+      assert.equal(result.projectId, 'proj-1');
+    });
+
+    it('auto-creates session when it does not exist', async () => {
+      const result = await service.getOrCreate('new-session-id-123', { projectId: 'proj-x', source: 'debugprobe' });
+      assert.equal(result.id, 'new-session-id-123');
+      assert.equal(result.projectId, 'proj-x');
+      assert.equal(result.userId, 'debugprobe');
+      assert.ok(result.metadata.autoCreated);
+    });
+
+    it('uses defaults when no options provided', async () => {
+      const result = await service.getOrCreate('auto-sess-456');
+      assert.equal(result.id, 'auto-sess-456');
+      assert.equal(result.projectId, 'auto');
+      assert.equal(result.userId, 'probe');
+    });
+  });
+
+  describe('ingestEvents with autoCreate', () => {
+    it('auto-creates session when source header present', async () => {
+      const result = await service.ingestEvents('probe-session-789', [
+        { type: 'network', payload: { url: '/api/test' } },
+      ], { autoCreate: true, source: 'debugprobe' });
+      assert.equal(result.ingested, 1);
+      // Session should have been auto-created
+      const session = await service.get('probe-session-789');
+      assert.equal(session.projectId, 'auto');
+      assert.ok(session.metadata.autoCreated);
+    });
+  });
 });

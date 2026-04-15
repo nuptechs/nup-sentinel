@@ -72,6 +72,15 @@ describe('ClaudeAIAdapter._getClient (D6)', () => {
     const client = await a._getClient();
     assert.equal(client, mock);
   });
+
+  it('creates and caches Anthropic client when configured', async () => {
+    const a = new ClaudeAIAdapter({ apiKey: 'key' });
+    const client = await a._getClient();
+    const cached = await a._getClient();
+
+    assert.ok(client);
+    assert.equal(cached, client);
+  });
 });
 
 // ── D7: _parseJSON ────────────────────────────
@@ -220,6 +229,18 @@ describe('ClaudeAIAdapter.generateCorrection (D1 D9)', () => {
     a._client = mock;
     await a.generateCorrection({ finding: { id: 'f1' }, diagnosis: {} });
     assert.equal(mock._calls[0].max_tokens, 8192);
+  });
+
+  it('includes sourceFiles in correction prompt when provided', () => {
+    const a = makeAdapter();
+    const prompt = a._buildCorrectionPrompt({
+      finding: { id: 'f1' },
+      diagnosis: { rootCause: 'x' },
+      sourceFiles: { 'src/UserService.java': 'class UserService {}' },
+    });
+
+    assert.ok(prompt.includes('Source Code (modify these files)'));
+    assert.ok(prompt.includes('src/UserService.java'));
   });
 });
 

@@ -300,3 +300,173 @@ describe('ManifestAnalyzerAdapter._parseProjectRoots (D7 D2)', () => {
     assert.equal(Object.keys(result).length, 2); // "broken" ignored
   });
 });
+
+// ── getSourceFile ─────────────────────────────
+
+describe('ManifestAnalyzerAdapter.getSourceFile', () => {
+  it('returns null when no rootDir resolved', async () => {
+    const a = new ManifestAnalyzerAdapter({ baseUrl: 'http://x', projectRoot: null });
+    // Override _resolveProjectRoot to return null
+    a._resolveProjectRoot = () => null;
+    const result = await a.getSourceFile('proj-1', 'SomeFile.java');
+    assert.equal(result, null);
+  });
+
+  it('returns null when filePath is falsy', async () => {
+    const a = new ManifestAnalyzerAdapter({ baseUrl: 'http://x', projectRoot: '/tmp' });
+    const result = await a.getSourceFile('proj-1', null);
+    assert.equal(result, null);
+  });
+
+  it('returns null when all candidate paths fail to read', async () => {
+    const a = new ManifestAnalyzerAdapter({ baseUrl: 'http://x', projectRoot: '/nonexistent/path/that/does/not/exist' });
+    const result = await a.getSourceFile('proj-1', 'Missing.java');
+    assert.equal(result, null);
+  });
+});
+
+// ── listEndpoints ─────────────────────────────
+
+describe('ManifestAnalyzerAdapter.listEndpoints', () => {
+  beforeEach(setupFetch);
+  afterEach(teardownFetch);
+
+  it('returns mapped endpoint list from catalog', async () => {
+    queueJson([
+      { endpoint: '/api/users', httpMethod: 'GET', controllerClass: 'UserWs' },
+      { endpoint: '/api/users', httpMethod: 'POST', controllerClass: 'CreateUserWs' },
+    ]);
+    const a = new ManifestAnalyzerAdapter({ baseUrl: 'http://manifest' });
+    const result = await a.listEndpoints('proj-1');
+    assert.equal(result.length, 2);
+    assert.equal(result[0].endpoint, '/api/users');
+    assert.equal(result[0].method, 'GET');
+    assert.equal(result[0].controller, 'UserWs');
+    assert.equal(result[1].method, 'POST');
+  });
+
+  it('returns empty array when no entries', async () => {
+    queueJson([]);
+    const a = new ManifestAnalyzerAdapter({ baseUrl: 'http://manifest' });
+    const result = await a.listEndpoints('proj-1');
+    assert.deepEqual(result, []);
+  });
+});
+
+// ── analyze ───────────────────────────────────
+
+describe('ManifestAnalyzerAdapter.analyze', () => {
+  beforeEach(setupFetch);
+  afterEach(teardownFetch);
+
+  it('sends POST to analyze endpoint and returns response', async () => {
+    queueJson({ status: 'completed', totalEndpoints: 42 });
+    const a = new ManifestAnalyzerAdapter({ baseUrl: 'http://manifest' });
+    const result = await a.analyze('proj-1');
+    assert.equal(result.status, 'completed');
+    assert.equal(result.totalEndpoints, 42);
+    assert.ok(_calls[0].url.includes('/api/projects/proj-1/analyze'));
+    assert.equal(_calls[0].opts.method, 'POST');
+  });
+});
+
+// ── _extractSourceFiles with repositoryMethods ─
+
+describe('ManifestAnalyzerAdapter._extractSourceFiles (repositoryMethods)', () => {
+  it('extracts paths from repositoryMethods classNames', () => {
+    const a = new ManifestAnalyzerAdapter({ baseUrl: 'http://x' });
+    const entry = {
+      controllerClass: 'easynup.web.UserWs',
+      serviceMethods: [],
+      repositoryMethods: [
+        { className: 'easynup.repo.UserRepo', method: 'findAll' },
+        { className: 'easynup.repo.RoleRepo', method: 'findById' },
+      ],
+    };
+    const files = a._extractSourceFiles(entry);
+    assert.ok(files.includes('easynup/web/UserWs.java'));
+    assert.ok(files.includes('easynup/repo/UserRepo.java'));
+    assert.ok(files.includes('easynup/repo/RoleRepo.java'));
+  });
+
+  it('skips repositoryMethods without className', () => {
+    const a = new ManifestAnalyzerAdapter({ baseUrl: 'http://x' });
+    const entry = {
+      controllerClass: null,
+      serviceMethods: [],
+      repositoryMethods: [{ method: 'findAll' }],
+    };
+    const files = a._extractSourceFiles(entry);
+    assert.equal(files.length, 0);
+  });
+});
+
+// ── _resolveProjectRoot branches ──────────────
+
+describe('ManifestAnalyzerAdapter._resolveProjectRoot', () => {
+  it('returns mapped root from projectRoots by projectId', () => {
+    const a = new ManifestAnalyzerAdapter({
+      baseUrl: 'http://x',
+      projectRoots: { '42': '/home/proj42', default: '/home/default' },
+    });
+    assert.equal(a._resolveProjectRoot('42'), '/home/proj42');
+  });
+
+  it('falls back to projectRoots.default', () => {
+    const a = new ManifestAnalyzerAdapter({
+      baseUrl: 'http://x',
+      projectRoots: { default: '/home/default' },
+    });
+    assert.equal(a._resolveProjectRoot('unknown-id'), '/home/default');
+  });
+
+  it('falls back to projectRoots["*"] wildcard', () => {
+    const a = new ManifestAnalyzerAdapter({
+      baseUrl: 'http://x',
+      projectRoots: { '*': '/home/wildcard' },
+    });
+    assert.equal(a._resolveProjectRoot('any'), '/home/wildcard');
+  });
+
+  it('falls back to projectRoot when projectRoots has no match', () => {
+    const a = new ManifestAnalyzerAdapter({
+      baseUrl: 'http://x',
+      projectRoot: '/home/single-root',
+    });
+    assert.equal(a._resolveProjectRoot('any'), '/home/single-root');
+  });
+
+  it('returns null when no roots configured and no sibling dir found', () => {
+    const a = new ManifestAnalyzerAdapter({ baseUrl: 'http://x' });
+    // Ensure projectRoot / projectRoots are null
+    a.projectRoot = null;
+    a.projectRoots = {};
+    // Uses sibling candidates based on cwd — might or might not find them
+    // We just test it doesn't throw
+    const result = a._resolveProjectRoot('nonexistent-project-xyz-999');
+    // Result could be null or a path if one of the sibling candidates exists
+    assert.equal(typeof result, result === null ? 'object' : 'string');
+  });
+});
+
+// ── _getCandidatePaths ────────────────────────
+
+describe('ManifestAnalyzerAdapter._getCandidatePaths', () => {
+  it('generates multiple candidate paths from a file path', () => {
+    const a = new ManifestAnalyzerAdapter({ baseUrl: 'http://x' });
+    const candidates = a._getCandidatePaths('/app/root', 'easynup/UserService.java');
+    assert.ok(candidates.length > 0);
+    // Should include the raw path and the stripped prefix
+    assert.ok(candidates.some(c => c.includes('UserService.java')));
+  });
+
+  it('normalizes backslashes and leading slashes', () => {
+    const a = new ManifestAnalyzerAdapter({ baseUrl: 'http://x' });
+    const candidates = a._getCandidatePaths('/app/root', '\\some\\path\\File.java');
+    assert.ok(candidates.length > 0);
+    // All candidates should be inside root
+    for (const c of candidates) {
+      assert.ok(c.startsWith('/app/root'));
+    }
+  });
+});

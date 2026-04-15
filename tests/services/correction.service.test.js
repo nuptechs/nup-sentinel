@@ -117,4 +117,79 @@ describe('CorrectionService', () => {
       (err) => err instanceof NotFoundError
     );
   });
+
+  it('clarify throws IntegrationError if AI not configured', async () => {
+    const finding = await insertDiagnosedFinding();
+    const svc = new CorrectionService({
+      storage, analyzer: makeMockAnalyzer(),
+      ai: { isConfigured: () => false }, notification: null,
+    });
+    await assert.rejects(
+      () => svc.clarify(finding.id, 'question'),
+      (err) => err instanceof IntegrationError
+    );
+  });
+
+  it('sends notification when notification adapter is configured', async () => {
+    const finding = await insertDiagnosedFinding();
+    let notified = false;
+    const mockNotification = {
+      isConfigured: () => true,
+      onCorrectionProposed: async () => { notified = true; },
+    };
+    const svc = new CorrectionService({
+      storage, analyzer: makeMockAnalyzer(),
+      ai: makeMockAI(), notification: mockNotification,
+    });
+
+    await svc.generateCorrection(finding.id);
+    assert.ok(notified, 'notification should have been called');
+  });
+
+  it('swallows notification errors without failing', async () => {
+    const finding = await insertDiagnosedFinding();
+    const mockNotification = {
+      isConfigured: () => true,
+      onCorrectionProposed: async () => { throw new Error('webhook down'); },
+    };
+    const svc = new CorrectionService({
+      storage, analyzer: makeMockAnalyzer(),
+      ai: makeMockAI(), notification: mockNotification,
+    });
+
+    // Should not throw even though notification fails
+    const result = await svc.generateCorrection(finding.id);
+    assert.equal(result.status, 'fix_proposed');
+  });
+
+  it('_extractFilePaths extracts from codeContext endpoints', () => {
+    const svc = new CorrectionService({
+      storage, analyzer: makeMockAnalyzer(),
+      ai: makeMockAI(), notification: null,
+    });
+    const fakeFinding = {
+      codeContext: {
+        endpoints: [
+          { sourceFiles: ['Service.java', 'Repo.java'], controllerClass: 'Controller.java' },
+          { serviceClass: 'OtherService.java' },
+        ],
+      },
+      diagnosis: { suggestedFix: { files: ['Extra.java'] } },
+    };
+    const paths = svc._extractFilePaths(fakeFinding);
+    assert.ok(paths.includes('Service.java'));
+    assert.ok(paths.includes('Repo.java'));
+    assert.ok(paths.includes('Controller.java'));
+    assert.ok(paths.includes('OtherService.java'));
+    assert.ok(paths.includes('Extra.java'));
+  });
+
+  it('_extractFilePaths handles finding with no codeContext', () => {
+    const svc = new CorrectionService({
+      storage, analyzer: makeMockAnalyzer(),
+      ai: makeMockAI(), notification: null,
+    });
+    const paths = svc._extractFilePaths({ codeContext: null, diagnosis: null });
+    assert.deepEqual(paths, []);
+  });
 });

@@ -203,6 +203,23 @@ describe('rateLimiter (D1 D2 D6 D8)', () => {
     mw(userB, makeRes(), nextB); // user-B: own counter, passes
     assert.equal(nextB.state.args.length, 0);
   });
+
+  it('falls back to socket.remoteAddress when req.ip is undefined', () => {
+    const mw = rateLimiter({ maxRequests: 1, windowMs: 60_000 });
+    const req1 = makeReq({ ip: undefined, socket: { remoteAddress: '10.0.0.1' } });
+    req1.ip = undefined; // override helper default
+    const next = promiseNext();
+    mw(req1, makeRes(), next);
+    assert.equal(next.state.args.length, 0); // passed
+  });
+
+  it('uses "unknown" when both req.ip and socket are missing', () => {
+    const mw = rateLimiter({ maxRequests: 1, windowMs: 60_000 });
+    const req1 = { get: () => null, headers: {}, ip: undefined, socket: null, method: 'GET', path: '/' };
+    const next = promiseNext();
+    mw(req1, makeRes(), next);
+    assert.equal(next.state.args.length, 0); // passed using "unknown" key
+  });
 });
 
 // ── Error Handler (D1 D6 D7 D8) ──────────────

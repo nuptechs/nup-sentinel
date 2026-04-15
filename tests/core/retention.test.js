@@ -2,11 +2,17 @@
 // Tests — RetentionJob
 // ─────────────────────────────────────────────
 
-import { describe, it } from 'node:test';
+import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { RetentionJob } from '../../src/core/retention.js';
 
 describe('RetentionJob', () => {
+  let job;
+
+  afterEach(() => {
+    if (job) job.stop();
+  });
+
   it('runs cleanup for sessions, events, traces, and findings', async () => {
     const calls = [];
     const pool = {
@@ -66,5 +72,69 @@ describe('RetentionJob', () => {
 
     resolveFirst({ rowCount: 0 });
     await firstRun;
+  });
+
+  it('start schedules initial run only once and stop clears timer', () => {
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    const originalLog = console.log;
+
+    const calls = { timeout: [], interval: [], cleared: [] };
+    const fakeTimer = { id: 'timer-1' };
+
+    globalThis.setTimeout = (fn, ms) => {
+      calls.timeout.push(ms);
+      return { ms, fn };
+    };
+    globalThis.setInterval = (fn, ms) => {
+      calls.interval.push(ms);
+      return fakeTimer;
+    };
+    globalThis.clearInterval = (timer) => {
+      calls.cleared.push(timer);
+    };
+    console.log = () => {};
+
+    try {
+      job = new RetentionJob({ pool: { query: async () => ({ rowCount: 0 }) }, intervalMs: 5_000 });
+      job.start();
+      job.start();
+
+      assert.deepEqual(calls.timeout, [10_000]);
+      assert.deepEqual(calls.interval, [5_000]);
+      assert.equal(job._timer, fakeTimer);
+
+      job.stop();
+      assert.equal(job._timer, null);
+      assert.deepEqual(calls.cleared, [fakeTimer]);
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+      console.log = originalLog;
+    }
+  });
+
+  it('logs cleanup errors and resets running flag', async () => {
+    const originalError = console.error;
+    const errors = [];
+    console.error = (...args) => errors.push(args.join(' '));
+
+    try {
+      job = new RetentionJob({
+        pool: {
+          query: async () => { throw new Error('db down'); },
+        },
+      });
+
+      const stats = await job.run();
+
+      assert.deepEqual(stats, { sessions: 0, events: 0, traces: 0, findings: 0 });
+      assert.equal(job._running, false);
+      assert.ok(errors.some(msg => msg.includes('Retention cleanup error: db down')));
+    } finally {
+      console.error = originalError;
+    }
   });
 });

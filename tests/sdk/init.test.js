@@ -220,6 +220,30 @@ describe('SentinelInstance methods (D8)', () => {
     await instance.stop();
   });
 
+  it('addIntegration() logs and swallows setup failures', async () => {
+    queueOk({ data: { id: 'sess-add-fail' } });
+
+    const instance = await init({
+      serverUrl: 'http://sentinel:7070',
+      projectId: 'proj-1',
+      integrations: [],
+    });
+
+    const originalWarn = console.warn;
+    const warnings = [];
+    console.warn = (...args) => warnings.push(args.join(' '));
+
+    try {
+      instance.addIntegration(new FailingIntegration());
+      assert.ok(warnings.some(msg => msg.includes('setup failed')));
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    queueOk(); queueOk();
+    await instance.stop();
+  });
+
   it('report() delegates to reporter.reportFinding', async () => {
     queueOk({ data: { id: 'sess-report' } });
     const instance = await init({

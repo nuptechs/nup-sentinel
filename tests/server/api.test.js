@@ -274,6 +274,52 @@ describe('HTTP API', () => {
     });
   });
 
+  // ── Session Replay ─────────────────────
+
+  describe('GET /api/sessions/:id/replay', () => {
+    it('returns rrweb replay events', async () => {
+      const session = await makeRequest(server, 'POST', '/api/sessions', { projectId: 'p' });
+      const sid = session.body.data.id;
+
+      // Ingest some dom events with rrweb source
+      await makeRequest(server, 'POST', `/api/sessions/${sid}/events`, {
+        events: [
+          { type: 'dom', source: 'rrweb', payload: { type: 3, data: { x: 100 } } },
+          { type: 'dom', source: 'rrweb', payload: { type: 3, data: { x: 200 } } },
+          { type: 'error', source: 'window', payload: { msg: 'err' } },
+        ],
+      });
+
+      const res = await makeRequest(server, 'GET', `/api/sessions/${sid}/replay`);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.success, true);
+      assert.equal(res.body.data.sessionId, sid);
+      assert.equal(res.body.data.count, 2);
+      assert.equal(res.body.data.events.length, 2);
+      // Should only have rrweb payloads (not the error event)
+      assert.deepEqual(res.body.data.events[0], { type: 3, data: { x: 100 } });
+    });
+
+    it('returns 404 for non-existent session', async () => {
+      const res = await makeRequest(server, 'GET', '/api/sessions/nonexistent/replay');
+      assert.equal(res.status, 404);
+    });
+
+    it('returns empty events when no rrweb data exists', async () => {
+      const session = await makeRequest(server, 'POST', '/api/sessions', { projectId: 'p' });
+      const sid = session.body.data.id;
+
+      await makeRequest(server, 'POST', `/api/sessions/${sid}/events`, {
+        events: [{ type: 'dom', source: 'manual', payload: { x: 1 } }],
+      });
+
+      const res = await makeRequest(server, 'GET', `/api/sessions/${sid}/replay`);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.data.count, 0);
+      assert.deepEqual(res.body.data.events, []);
+    });
+  });
+
   // ── Findings ────────────────────────────
 
   describe('POST /api/findings', () => {

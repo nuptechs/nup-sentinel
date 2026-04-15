@@ -167,6 +167,17 @@ describe('VideoCapture (D1 D9)', () => {
     assert.ok(v._screenStream);
   });
 
+  it('start() continues when microphone access fails', async () => {
+    globalThis.navigator.mediaDevices.getUserMedia = async () => { throw new Error('mic denied'); };
+
+    const v = new VideoCapture();
+    await v.start();
+
+    assert.equal(v.isRecording, true);
+    assert.equal(v._audioStream, null);
+    assert.equal(v._recorder.stream.getTracks().length, 1);
+  });
+
   it('stop() returns video Blob', async () => {
     const v = new VideoCapture();
     await v.start();
@@ -197,9 +208,27 @@ describe('AudioCapture._bestMime and VideoCapture._bestMime (D8)', () => {
     assert.equal(mime, 'audio/webm');
   });
 
+  it('AudioCapture falls back to audio/webm when no MIME is supported', () => {
+    globalThis.MediaRecorder = class UnsupportedRecorder {
+      static isTypeSupported() { return false; }
+    };
+
+    const a = new AudioCapture();
+    assert.equal(a._bestMime(), 'audio/webm');
+  });
+
   it('VideoCapture selects supported MIME', () => {
     const v = new VideoCapture();
     const mime = v._bestMime();
     assert.equal(mime, 'video/webm');
+  });
+
+  it('VideoCapture falls back to video/webm when no MIME is supported', () => {
+    globalThis.MediaRecorder = class UnsupportedRecorder {
+      static isTypeSupported() { return false; }
+    };
+
+    const v = new VideoCapture();
+    assert.equal(v._bestMime(), 'video/webm');
   });
 });
