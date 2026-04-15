@@ -508,6 +508,39 @@ describe('MCP Routes', () => {
       else delete process.env.SENTINEL_MCP_ENABLED;
     }
   });
+
+  it('/sse creates SSE transport and returns 200 with SENTINEL_MCP_ENABLED=true', async () => {
+    const prev = process.env.SENTINEL_MCP_ENABLED;
+    process.env.SENTINEL_MCP_ENABLED = 'true';
+    try {
+      const server = await startServer(minimalServices(storage));
+      const addr = server.address();
+      try {
+        const status = await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('SSE request timeout')), 5000);
+          const r = http.get(`http://127.0.0.1:${addr.port}/sse`, (res) => {
+            clearTimeout(timer);
+            const s = res.statusCode;
+            // Destroy client socket to trigger res.on('close') on the server side
+            res.socket?.destroy();
+            resolve(s);
+          });
+          r.on('error', (err) => {
+            // ECONNRESET is expected after socket.destroy()
+            if (err.code !== 'ECONNRESET') reject(err);
+          });
+        });
+        assert.equal(status, 200);
+      } finally {
+        // Allow one I/O cycle for socket-close events to propagate before shutdown
+        await new Promise(resolve => setImmediate(resolve));
+        await stopServer(server);
+      }
+    } finally {
+      if (prev !== undefined) process.env.SENTINEL_MCP_ENABLED = prev;
+      else delete process.env.SENTINEL_MCP_ENABLED;
+    }
+  });
 });
 
 // ── App factory basics ──────────────────────
