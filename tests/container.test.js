@@ -5,8 +5,10 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { getContainer, resetContainer } from '../src/container.js';
+import { getContainer, resetContainer, initializeContainer, shutdownContainer } from '../src/container.js';
 import { MemoryStorageAdapter } from '../src/adapters/storage/memory.adapter.js';
+import { DebugProbeTraceAdapter } from '../src/adapters/trace/debugprobe.adapter.js';
+import { NoopTraceAdapter } from '../src/adapters/trace/noop.adapter.js';
 import { ManifestAnalyzerAdapter } from '../src/adapters/analyzer/manifest.adapter.js';
 import { NoopAnalyzerAdapter } from '../src/adapters/analyzer/noop.adapter.js';
 import { ClaudeAIAdapter } from '../src/adapters/ai/claude.adapter.js';
@@ -26,6 +28,7 @@ const SENTINEL_VARS = [
   'SENTINEL_LINEAR_API_KEY', 'SENTINEL_LINEAR_TEAM_ID',
   'SENTINEL_JIRA_URL', 'SENTINEL_JIRA_TOKEN',
   'DEBUG_PROBE_URL', 'SENTINEL_TRACE',
+  'SENTINEL_TRACE_URL', 'PROBE_SERVER_URL', 'SENTINEL_TRACE_API_KEY', 'PROBE_API_KEY',
 ];
 
 let savedEnvs = {};
@@ -219,5 +222,63 @@ describe('Container service wiring (D9)', () => {
     assert.ok(c.services.diagnosis);
     assert.ok(c.services.correction);
     assert.ok(c.services.integration);
+  });
+});
+
+// ── initializeContainer & shutdownContainer ───
+
+describe('Container lifecycle (initializeContainer / shutdownContainer)', () => {
+  it('initializeContainer initializes storage', async () => {
+    await initializeContainer();
+    const c = await getContainer();
+    assert.ok(c.adapters.storage instanceof MemoryStorageAdapter);
+  });
+
+  it('shutdownContainer clears the singleton', async () => {
+    await getContainer(); // ensure built
+    await shutdownContainer();
+    // After shutdown, next getContainer builds fresh
+    const c = await getContainer();
+    assert.ok(c.adapters.storage instanceof MemoryStorageAdapter);
+  });
+
+  it('shutdownContainer is no-op when not initialized', async () => {
+    resetContainer();
+    // Should not throw
+    await shutdownContainer();
+  });
+});
+
+// ── Trace adapter selection ───────────────────
+
+describe('Container trace adapter selection', () => {
+  it('uses NoopTraceAdapter when no trace config', async () => {
+    const c = await getContainer();
+    assert.ok(c.adapters.trace instanceof NoopTraceAdapter);
+  });
+
+  it('uses DebugProbeTraceAdapter when DEBUG_PROBE_URL is set', async () => {
+    process.env.DEBUG_PROBE_URL = 'http://localhost:7070';
+    const c = await getContainer();
+    assert.ok(c.adapters.trace instanceof DebugProbeTraceAdapter);
+  });
+
+  it('uses DebugProbeTraceAdapter when SENTINEL_TRACE=debugprobe', async () => {
+    process.env.SENTINEL_TRACE = 'debugprobe';
+    const c = await getContainer();
+    assert.ok(c.adapters.trace instanceof DebugProbeTraceAdapter);
+  });
+
+  it('uses SENTINEL_TRACE_URL over DEBUG_PROBE_URL', async () => {
+    process.env.SENTINEL_TRACE_URL = 'http://custom:9090';
+    process.env.DEBUG_PROBE_URL = 'http://default:7070';
+    const c = await getContainer();
+    assert.ok(c.adapters.trace instanceof DebugProbeTraceAdapter);
+  });
+
+  it('uses PROBE_SERVER_URL as fallback', async () => {
+    process.env.PROBE_SERVER_URL = 'http://probe:7070';
+    const c = await getContainer();
+    assert.ok(c.adapters.trace instanceof DebugProbeTraceAdapter);
   });
 });
