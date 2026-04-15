@@ -312,4 +312,333 @@ describe('DebugProbeTraceAdapter', () => {
       assert.equal(adapter.size, 0);
     });
   });
+
+  // ── Circuit breaker — isFailure predicate ───────────────────────────────
+
+  describe('circuit breaker isFailure predicate', () => {
+    it('does not count 4xx errors as circuit failures', async () => {
+      const remoteAdapter = new DebugProbeTraceAdapter({
+        baseUrl: 'http://probe.local',
+        apiKey: 'k',
+        maxTraces: 100,
+      });
+
+      const err4xx = new Error('Not Found');
+      err4xx.status = 404;
+      const isFailure = remoteAdapter._remoteBreaker.isFailure;
+      assert.equal(isFailure(err4xx), false, '404 should NOT be a circuit failure');
+    });
+
+    it('counts 5xx and network errors as circuit failures', async () => {
+      const remoteAdapter = new DebugProbeTraceAdapter({
+        baseUrl: 'http://probe.local',
+        apiKey: 'k',
+        maxTraces: 100,
+      });
+
+      const isFailure = remoteAdapter._remoteBreaker.isFailure;
+      const err5xx = new Error('Server Error');
+      err5xx.status = 500;
+      assert.equal(isFailure(err5xx), true, '500 should be a circuit failure');
+
+      const networkErr = new Error('ECONNREFUSED');
+      assert.equal(isFailure(networkErr), true, 'Network error should be a circuit failure');
+    });
+  });
+
+  // ── getTraces — circuit open / fetch failure branches ───────────────────
+
+  describe('getTraces — remote failure branches', () => {
+    it('falls through to local store when remote fetch throws (non-circuit-open)', async () => {
+      const originalFetch = global.fetch;
+      global.fetch = async () => { throw new Error('ECONNREFUSED'); };
+
+      try {
+        const remoteAdapter = new DebugProbeTraceAdapter({
+          baseUrl: 'http://probe.local',
+          apiKey: 'k',
+          maxTraces: 100,
+        });
+
+        // Pre-seed a local trace
+        remoteAdapter._store({
+          correlationId: 'local-cid',
+          sessionId: 'sess-fallback',
+          request: { method: 'GET', path: '/local' },
+          response: { statusCode: 200, durationMs: 1 },
+          queries: [],
+          createdAt: Date.now(),
+        });
+
+        const traces = await remoteAdapter.getTraces('sess-fallback');
+        // Should fall through to local store and return the seeded trace
+        assert.equal(traces.length, 1);
+        assert.equal(traces[0].correlationId, 'local-cid');
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it('silently falls back when circuit is OPEN (no warning logged for isCircuitOpen)', async () => {
+      const remoteAdapter = new DebugProbeTraceAdapter({
+        baseUrl: 'http://probe.local',
+        apiKey: 'k',
+        maxTraces: 100,
+        // Low threshold to trip circuit quickly
+      });
+
+      // Force circuit OPEN by driving failures past the threshold
+      remoteAdapter._remoteBreaker.state = 'OPEN';
+      remoteAdapter._remoteBreaker._openedAt = Date.now() - 1; // already open
+
+      // Pre-seed local trace
+      remoteAdapter._store({
+        correlationId: 'open-cid',
+        sessionId: 'sess-open',
+        request: { method: 'GET', path: '/x' },
+        response: { statusCode: 200, durationMs: 1 },
+        queries: [],
+        createdAt: Date.now(),
+      });
+
+      // Should not throw; circuit OPEN → fallback undefined → CircuitOpenError caught → local store
+      const traces = await remoteAdapter.getTraces('sess-open');
+      assert.equal(traces.length, 1);
+      assert.equal(traces[0].correlationId, 'open-cid');
+    });
+  });
+
+  // ── getTraceByCorrelation — durable storage error path ──────────────────
+
+  describe('getTraceByCorrelation — storage error path', () => {
+    it('warns and returns null when durable storage throws', async () => {
+      const errorStorage = {
+        async storeTrace() {},
+        async getTracesBySession() { return []; },
+        async getTraceByCorrelation() { throw new Error('DB connection lost'); },
+      };
+
+      const durableAdapter = new DebugProbeTraceAdapter({
+        maxTraces: 100,
+        storage: errorStorage,
+      });
+
+      // Not in cache, not in memory — triggers durable path which will throw
+      const result = await durableAdapter.getTraceByCorrelation('missing-cid');
+      assert.equal(result, null);
+    });
+  });
+
+  // ── getTraces — time window filtering ───────────────────────────────────
+
+  describe('getTraces — time window filtering', () => {
+    it('filters traces by fromTime', async () => {
+      const now = Date.now();
+      const a = { correlationId: 'old', sessionId: 'sess-time', request: {}, response: {}, queries: [], createdAt: now - 10000 };
+      const b = { correlationId: 'new', sessionId: 'sess-time', request: {}, response: {}, queries: [], createdAt: now };
+      adapter._store(a);
+      adapter._store(b);
+
+      const traces = await adapter.getTraces('sess-time', { since: now - 5000 });
+      assert.equal(traces.length, 1);
+      assert.equal(traces[0].correlationId, 'new');
+    });
+
+    it('filters traces by toTime', async () => {
+      const now = Date.now();
+      const a = { correlationId: 'old-t', sessionId: 'sess-time2', request: {}, response: {}, queries: [], createdAt: now - 10000 };
+      const b = { correlationId: 'new-t', sessionId: 'sess-time2', request: {}, response: {}, queries: [], createdAt: now };
+      adapter._store(a);
+      adapter._store(b);
+
+      const traces = await adapter.getTraces('sess-time2', { until: now - 5000 });
+      assert.equal(traces.length, 1);
+      assert.equal(traces[0].correlationId, 'old-t');
+    });
+  });
+
+  // ── _store — durable write failure suppression ───────────────────────────
+
+  describe('_store — durable write failure', () => {
+    it('swallows storeTrace errors and continues', async () => {
+      const failStorage = {
+        async storeTrace() { throw new Error('write error'); },
+        async getTracesBySession() { return []; },
+        async getTraceByCorrelation() { return null; },
+      };
+
+      const durableAdapter = new DebugProbeTraceAdapter({ maxTraces: 100, storage: failStorage });
+
+      // Should not throw even if persistence fails
+      durableAdapter._store({
+        correlationId: 'sw-cid', sessionId: 'sw-sess',
+        request: {}, response: {}, queries: [], createdAt: Date.now(),
+      });
+
+      // Give the fire-and-forget promise a chance to settle
+      await new Promise(resolve => setImmediate(resolve));
+
+      // Trace is still in memory
+      assert.equal(durableAdapter.size, 1);
+    });
+  });
+
+  // ── _evict — last entry in session cleans up sessionIndex ────────────────
+
+  describe('_evict — sessionIndex cleanup', () => {
+    it('removes sessionIndex entry when last correlationId for session is evicted', () => {
+      adapter._store({
+        correlationId: 'only-one', sessionId: 'sess-evict',
+        request: {}, response: {}, queries: [], createdAt: Date.now(),
+      });
+
+      assert.ok(adapter.sessionIndex.has('sess-evict'));
+
+      adapter._evict('only-one');
+
+      // sessionIndex key should be cleaned up
+      assert.ok(!adapter.sessionIndex.has('sess-evict'));
+      assert.equal(adapter.size, 0);
+    });
+  });
+
+  // ── _fetchJSON — non-ok response error with .status ──────────────────────
+
+  describe('_fetchJSON — HTTP error branch', () => {
+    it('throws an error with .status when remote returns non-ok', async () => {
+      const originalFetch = global.fetch;
+      global.fetch = async () => ({
+        ok: false,
+        status: 503,
+        async json() { return {}; },
+      });
+
+      const remoteAdapter = new DebugProbeTraceAdapter({
+        baseUrl: 'http://probe.local',
+        apiKey: 'k',
+        maxTraces: 100,
+      });
+
+      try {
+        await assert.rejects(
+          () => remoteAdapter._fetchJSON('/api/test'),
+          (err) => {
+            assert.ok(err.message.includes('503'));
+            assert.equal(err.status, 503);
+            return true;
+          },
+        );
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+  });
+
+  // ── _fetchRemoteTraces — since/until params + default event type ─────────
+
+  describe('_fetchRemoteTraces — query params and default event type', () => {
+    it('sets fromTime and toTime query params when since/until provided', async () => {
+      let capturedUrl = '';
+      const originalFetch = global.fetch;
+      global.fetch = async (url) => {
+        capturedUrl = url;
+        return {
+          ok: true,
+          async json() { return { events: [], total: 0 }; },
+        };
+      };
+
+      const remoteAdapter = new DebugProbeTraceAdapter({
+        baseUrl: 'http://probe.local',
+        apiKey: 'k',
+        maxTraces: 100,
+      });
+
+      try {
+        await remoteAdapter._fetchRemoteTraces('sess-q', { since: 1000, until: 2000, limit: 10 });
+        assert.ok(capturedUrl.includes('fromTime=1000'), `Expected fromTime in URL: ${capturedUrl}`);
+        assert.ok(capturedUrl.includes('toTime=2000'), `Expected toTime in URL: ${capturedUrl}`);
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it('groups events with unknown type under the same correlationId (default branch)', async () => {
+      const originalFetch = global.fetch;
+      global.fetch = async () => ({
+        ok: true,
+        async json() {
+          return {
+            events: [
+              {
+                id: 'e1',
+                correlationId: 'corr-x',
+                sessionId: 'sess-x',
+                type: 'unknown-event-type',
+                timestamp: 100,
+                data: { whatever: true },
+              },
+            ],
+            total: 1,
+          };
+        },
+      });
+
+      const remoteAdapter = new DebugProbeTraceAdapter({
+        baseUrl: 'http://probe.local',
+        apiKey: 'k',
+        maxTraces: 100,
+      });
+
+      try {
+        const traces = await remoteAdapter._fetchRemoteTraces('sess-x', {});
+        // The unknown event type should still produce a grouped entry
+        assert.equal(traces.length, 1);
+        assert.equal(traces[0].correlationId, 'corr-x');
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+  });
+
+  // ── wrapPool — _recordQuery inside request context ────────────────────────
+
+  describe('wrapPool — _recordQuery in request context', () => {
+    it('attaches SQL query to trace entry when called inside middleware context', async () => {
+      const middleware = adapter.createMiddleware();
+      const req = {
+        method: 'GET', path: '/traced', originalUrl: '/traced',
+        ip: '127.0.0.1', query: {}, body: null,
+        headers: {
+          'x-sentinel-session': 'sess-query',
+          'x-sentinel-correlation': 'corr-query',
+        },
+        get: (name) => req.headers[name.toLowerCase()],
+      };
+      const res = {
+        statusCode: 200, _headers: {},
+        getHeaders: () => ({}),
+        setHeader: () => {},
+        end: () => {},
+      };
+
+      const fakePool = { query: async () => ({ rowCount: 1, rows: [{ id: 42 }] }) };
+      const wrapped = adapter.wrapPool(fakePool);
+
+      await new Promise((resolve) => {
+        middleware(req, res, async () => {
+          await wrapped.query('SELECT id FROM users WHERE id = $1', [42]);
+          resolve();
+        });
+      });
+
+      res.end();
+      await new Promise(resolve => setImmediate(resolve));
+
+      const traces = await adapter.getTraces('sess-query');
+      assert.equal(traces.length, 1);
+      assert.equal(traces[0].payload.queryCount, 1);
+      assert.equal(traces[0].payload.queries[0].sql, 'SELECT id FROM users WHERE id = $1');
+    });
+  });
 });
