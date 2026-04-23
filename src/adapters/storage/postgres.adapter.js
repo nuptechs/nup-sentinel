@@ -319,6 +319,82 @@ export class PostgresStorageAdapter extends StoragePort {
     await this.pool.end();
   }
 
+  // ── Webhook events ────────────────────────
+
+  async createWebhookEvent(row) {
+    await this.pool.query(
+      `INSERT INTO sentinel_webhook_events
+         (id, target_url, event, payload, status, attempts, last_attempt_at, error_message, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        row.id,
+        row.targetUrl,
+        row.event,
+        JSON.stringify(row.payload ?? null),
+        row.status,
+        row.attempts ?? 0,
+        row.lastAttemptAt ? new Date(row.lastAttemptAt) : null,
+        row.errorMessage ?? null,
+        row.createdAt ? new Date(row.createdAt) : new Date(),
+      ]
+    );
+    return row;
+  }
+
+  async getWebhookEvent(id) {
+    const { rows } = await this.pool.query(
+      `SELECT * FROM sentinel_webhook_events WHERE id = $1`,
+      [id]
+    );
+    return rows[0] ? this._mapWebhookEvent(rows[0]) : null;
+  }
+
+  async updateWebhookEvent(id, patch) {
+    const fields = [];
+    const params = [id];
+    let idx = 2;
+    const map = {
+      status: 'status',
+      attempts: 'attempts',
+      lastAttemptAt: 'last_attempt_at',
+      errorMessage: 'error_message',
+    };
+    for (const [k, col] of Object.entries(map)) {
+      if (patch[k] !== undefined) {
+        fields.push(`${col} = $${idx}`);
+        params.push(k === 'lastAttemptAt' && patch[k] ? new Date(patch[k]) : patch[k]);
+        idx++;
+      }
+    }
+    if (fields.length === 0) return this.getWebhookEvent(id);
+    const { rows } = await this.pool.query(
+      `UPDATE sentinel_webhook_events SET ${fields.join(', ')} WHERE id = $1 RETURNING *`,
+      params
+    );
+    return rows[0] ? this._mapWebhookEvent(rows[0]) : null;
+  }
+
+  async listWebhookEvents({ status, limit = 100, offset = 0 } = {}) {
+    const conditions = [];
+    const params = [];
+    let idx = 1;
+    if (status) {
+      conditions.push(`status = $${idx}`);
+      params.push(status);
+      idx++;
+    }
+    params.push(limit, offset);
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const { rows } = await this.pool.query(
+      `SELECT * FROM sentinel_webhook_events
+       ${where}
+       ORDER BY created_at DESC
+       LIMIT $${idx} OFFSET $${idx + 1}`,
+      params
+    );
+    return rows.map((r) => this._mapWebhookEvent(r));
+  }
+
   isConfigured() {
     return !!this.pool;
   }
@@ -396,6 +472,20 @@ export class PostgresStorageAdapter extends StoragePort {
       queries: row.queries || [],
       durationMs: row.duration_ms != null ? Number(row.duration_ms) : null,
       createdAt: new Date(row.created_at).getTime(),
+    };
+  }
+
+  _mapWebhookEvent(row) {
+    return {
+      id: row.id,
+      targetUrl: row.target_url,
+      event: row.event,
+      payload: row.payload,
+      status: row.status,
+      attempts: Number(row.attempts),
+      lastAttemptAt: row.last_attempt_at ? new Date(row.last_attempt_at).toISOString() : null,
+      errorMessage: row.error_message,
+      createdAt: new Date(row.created_at).toISOString(),
     };
   }
 }

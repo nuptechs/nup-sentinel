@@ -16,6 +16,7 @@ export class MemoryStorageAdapter extends StoragePort {
     this.findings = new Map();
     this.traces = new Map();           // Map<correlationId, trace>
     this.traceSessionIndex = new Map(); // Map<sessionId, Set<correlationId>>
+    this.webhookEvents = new Map();
   }
 
   async createSession(session) {
@@ -161,6 +162,34 @@ export class MemoryStorageAdapter extends StoragePort {
     this.findings.clear();
     this.traces.clear();
     this.traceSessionIndex.clear();
+    this.webhookEvents.clear();
+  }
+
+  // ── Webhook events ────────────────────────
+
+  async createWebhookEvent(row) {
+    this.webhookEvents.set(row.id, structuredClone(row));
+    return row;
+  }
+
+  async getWebhookEvent(id) {
+    const row = this.webhookEvents.get(id);
+    return row ? structuredClone(row) : null;
+  }
+
+  async updateWebhookEvent(id, patch) {
+    const row = this.webhookEvents.get(id);
+    if (!row) return null;
+    const next = { ...row, ...patch };
+    this.webhookEvents.set(id, next);
+    return structuredClone(next);
+  }
+
+  async listWebhookEvents({ status, limit = 100, offset = 0 } = {}) {
+    let results = [...this.webhookEvents.values()];
+    if (status) results = results.filter((r) => r.status === status);
+    results.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return results.slice(offset, offset + limit).map((r) => structuredClone(r));
   }
 
   isConfigured() {

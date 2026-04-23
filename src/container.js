@@ -91,7 +91,7 @@ async function buildAdapters() {
     trace: buildTrace(storage),
     analyzer: buildAnalyzer(),
     ai: buildAI(),
-    notification: buildNotification(),
+    notification: buildNotification(storage),
     issueTracker: buildIssueTracker(),
   };
 }
@@ -213,13 +213,15 @@ function buildAI() {
   return { isConfigured: () => false };
 }
 
-function buildNotification() {
+function buildNotification(storage) {
   const url = process.env.WEBHOOK_URL;
   if (url) {
-    console.log(`[Sentinel] Notification: Webhook → ${url}`);
+    const persistent = process.env.SENTINEL_WEBHOOK_PERSISTENCE !== 'false';
+    console.log(`[Sentinel] Notification: Webhook → ${url}${persistent ? ' (persistent+retry)' : ' (fire-and-forget)'}`);
     return new WebhookNotificationAdapter({
       url,
       secret: process.env.WEBHOOK_SECRET,
+      storage: persistent ? storage : null,
     });
   }
   return new NoopNotificationAdapter();

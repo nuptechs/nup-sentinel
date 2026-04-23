@@ -77,6 +77,24 @@ export class StoragePort {
     throw new Error('StoragePort.deleteTracesBefore() not implemented');
   }
 
+  // ── Webhook events (optional — enables retry/DLQ) ──
+
+  async createWebhookEvent(row) {
+    throw new Error('StoragePort.createWebhookEvent() not implemented');
+  }
+
+  async getWebhookEvent(id) {
+    throw new Error('StoragePort.getWebhookEvent() not implemented');
+  }
+
+  async updateWebhookEvent(id, patch) {
+    throw new Error('StoragePort.updateWebhookEvent() not implemented');
+  }
+
+  async listWebhookEvents(options) {
+    throw new Error('StoragePort.listWebhookEvents() not implemented');
+  }
+
   // ── Lifecycle ─────────────────────────────
 
   async initialize() {

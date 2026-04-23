@@ -18,6 +18,7 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { createSessionRoutes } from './routes/sessions.js';
 import { createFindingRoutes } from './routes/findings.js';
 import { createProjectRoutes } from './routes/projects.js';
+import { createWebhookEventRoutes } from './routes/webhook-events.js';
 import { createSentinelMCP } from '../mcp/server.js';
 import { metricsMiddleware, metricsEndpoint } from '../observability/prometheus-middleware.js';
 
@@ -229,6 +230,9 @@ export function createApp(services, adapters = null) {
   app.use('/api/sessions', createSessionRoutes(services));
   app.use('/api/findings', createFindingRoutes(services));
   app.use('/api/projects', createProjectRoutes(services));
+  if (adapters) {
+    app.use('/api/webhook-events', createWebhookEventRoutes(adapters));
+  }
 
   // ── MCP Server (Streamable HTTP + legacy SSE) ────
   if (process.env.SENTINEL_MCP_ENABLED === 'true') {

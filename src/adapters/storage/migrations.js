@@ -119,6 +119,28 @@ const MIGRATIONS = [
         ON sentinel_findings (debug_probe_session_id) WHERE debug_probe_session_id IS NOT NULL;
     `,
   },
+  {
+    version: 3,
+    name: 'webhook_events',
+    sql: `
+      CREATE TABLE IF NOT EXISTS sentinel_webhook_events (
+        id               UUID PRIMARY KEY,
+        target_url       TEXT NOT NULL,
+        event            TEXT NOT NULL,
+        payload          JSONB NOT NULL,
+        status           TEXT NOT NULL DEFAULT 'pending',
+        attempts         INTEGER NOT NULL DEFAULT 0,
+        last_attempt_at  TIMESTAMPTZ,
+        error_message    TEXT,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sentinel_webhook_events_status
+        ON sentinel_webhook_events (status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_sentinel_webhook_events_created
+        ON sentinel_webhook_events (created_at DESC);
+    `,
+  },
 ];
 
 /**

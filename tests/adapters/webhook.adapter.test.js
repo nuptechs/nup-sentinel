@@ -155,13 +155,15 @@ describe('WebhookNotificationAdapter HMAC signature (D8 D9)', () => {
     assert.match(sig, /^sha256=[0-9a-f]{64}$/);
   });
 
-  it('signature is valid HMAC-SHA256 of the raw body (D9)', async () => {
+  it('signature is valid HMAC-SHA256 of timestamp.body (D9, anti-replay)', async () => {
     queueOk();
     const secret = 'test-webhook-secret';
     const a = new WebhookNotificationAdapter({ url: 'https://hooks.example.com/e', secret });
     await a.onFindingCreated(makeFinding());
     const body = _capturedCalls[0].body;
-    const expected = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
+    const timestamp = _capturedCalls[0].headers['X-Sentinel-Timestamp'];
+    assert.ok(timestamp, 'X-Sentinel-Timestamp must be present');
+    const expected = `sha256=${createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex')}`;
     assert.equal(_capturedCalls[0].headers['X-Sentinel-Signature'], expected);
   });
 
