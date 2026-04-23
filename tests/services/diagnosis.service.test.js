@@ -162,4 +162,79 @@ describe('DiagnosisService', () => {
     const eps = svc._extractEndpoints(traces);
     assert.equal(eps.length, 2);
   });
+
+  // ── enrichWithLiveTraces ─────────────────────
+
+  it('enrichWithLiveTraces throws NotFoundError for missing finding', async () => {
+    const svc = new DiagnosisService({
+      storage, trace: makeMockTrace(), analyzer: makeMockAnalyzer(),
+      ai: makeMockAI(),
+    });
+    await assert.rejects(() => svc.enrichWithLiveTraces('missing'), NotFoundError);
+  });
+
+  it('enrichWithLiveTraces returns skipped when trace adapter absent', async () => {
+    const finding = await insertFinding();
+    const svc = new DiagnosisService({
+      storage, trace: null, analyzer: makeMockAnalyzer(),
+      ai: makeMockAI(),
+    });
+    const result = await svc.enrichWithLiveTraces(finding.id);
+    assert.equal(result.added, 0);
+    assert.equal(result.skipped, 'trace-adapter-not-configured');
+  });
+
+  it('enrichWithLiveTraces returns skipped when trace unconfigured', async () => {
+    const finding = await insertFinding();
+    const svc = new DiagnosisService({
+      storage,
+      trace: { isConfigured: () => false, collectLive: async () => [] },
+      analyzer: makeMockAnalyzer(), ai: makeMockAI(),
+    });
+    const result = await svc.enrichWithLiveTraces(finding.id);
+    assert.equal(result.skipped, 'trace-adapter-not-configured');
+  });
+
+  it('enrichWithLiveTraces collects events and merges into liveEvents', async () => {
+    const finding = await insertFinding();
+    let calledWith = null;
+    const svc = new DiagnosisService({
+      storage,
+      trace: {
+        isConfigured: () => true,
+        collectLive: async (sid, opts) => {
+          calledWith = { sid, opts };
+          return [{ type: 'http', path: '/a' }, { type: 'sql', text: 'SELECT 1' }];
+        },
+      },
+      analyzer: makeMockAnalyzer(), ai: makeMockAI(),
+    });
+    const result = await svc.enrichWithLiveTraces(finding.id, { durationMs: 500, limit: 20 });
+    assert.equal(calledWith.sid, 'sess-1');
+    assert.equal(calledWith.opts.durationMs, 500);
+    assert.equal(result.added, 2);
+    assert.equal(result.total, 2);
+
+    const persisted = await storage.getFinding(finding.id);
+    assert.equal(persisted.backendContext.liveEvents.length, 2);
+
+    // Second call appends
+    const r2 = await svc.enrichWithLiveTraces(finding.id, { durationMs: 500 });
+    assert.equal(r2.total, 4);
+  });
+
+  it('enrichWithLiveTraces returns skipped on collect error (does not throw)', async () => {
+    const finding = await insertFinding();
+    const svc = new DiagnosisService({
+      storage,
+      trace: {
+        isConfigured: () => true,
+        collectLive: async () => { throw new Error('WS dropped'); },
+      },
+      analyzer: makeMockAnalyzer(), ai: makeMockAI(),
+    });
+    const result = await svc.enrichWithLiveTraces(finding.id);
+    assert.equal(result.skipped, 'collect-failed');
+    assert.equal(result.added, 0);
+  });
 });

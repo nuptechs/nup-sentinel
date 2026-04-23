@@ -252,6 +252,24 @@ describe('Finding Routes — push, suggest-title, media', () => {
     });
   });
 
+  // ── POST /api/findings/:id/enrich-live ───
+
+  describe('POST /api/findings/:id/enrich-live', () => {
+    it('returns skipped when trace adapter not configured', async () => {
+      const id = await createFinding();
+      const res = await makeRequest(server, 'POST', `/api/findings/${id}/enrich-live`, { durationMs: 200 });
+      assert.equal(res.status, 200);
+      assert.equal(res.body.success, true);
+      assert.equal(res.body.data.skipped, 'trace-adapter-not-configured');
+      assert.equal(res.body.data.added, 0);
+    });
+
+    it('returns 404 for missing finding', async () => {
+      const res = await makeRequest(server, 'POST', '/api/findings/missing/enrich-live', { durationMs: 100 });
+      assert.equal(res.status, 404);
+    });
+  });
+
   // ── POST /api/findings/:id/verify (false) ─
 
   describe('POST /api/findings/:id/verify (verified=false)', () => {

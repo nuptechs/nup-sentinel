@@ -107,6 +107,41 @@ export class DiagnosisService {
     return finding;
   }
 
+  /**
+   * Enrich a finding with realtime trace events collected from the
+   * backing TracePort (e.g. Debug Probe WebSocket). Independent of
+   * `diagnose()` — merges events into `backendContext.liveEvents`.
+   *
+   * @param {string} findingId
+   * @param {{durationMs?:number, limit?:number}} [options]
+   * @returns {Promise<{findingId:string, added:number, total:number, skipped?:string}>}
+   */
+  async enrichWithLiveTraces(findingId, options = {}) {
+    const finding = await this.storage.getFinding(findingId);
+    if (!finding) throw new NotFoundError(`Finding ${findingId} not found`);
+
+    if (!this.trace || typeof this.trace.collectLive !== 'function' || !this.trace.isConfigured?.()) {
+      return { findingId, added: 0, total: 0, skipped: 'trace-adapter-not-configured' };
+    }
+
+    let events = [];
+    try {
+      events = await this.trace.collectLive(finding.sessionId, options);
+    } catch (err) {
+      console.warn(`[Sentinel] Live trace collection failed for ${findingId}:`, err.message);
+      return { findingId, added: 0, total: 0, skipped: 'collect-failed' };
+    }
+
+    const prev = finding.backendContext || {};
+    const existing = Array.isArray(prev.liveEvents) ? prev.liveEvents : [];
+    const merged = existing.concat(events);
+
+    finding.attachBackendContext({ ...prev, liveEvents: merged });
+    await this.storage.updateFinding(finding);
+
+    return { findingId, added: events.length, total: merged.length };
+  }
+
   _extractEndpoints(traces) {
     const seen = new Set();
     const endpoints = [];

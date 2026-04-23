@@ -95,6 +95,14 @@ export function createFindingRoutes(services) {
     res.json({ success: true, data: finding.toJSON() });
   }));
 
+  // POST /api/findings/:id/enrich-live — Collect realtime traces for a window
+  router.post('/:id/enrich-live', asyncHandler(async (req, res) => {
+    const durationMs = Number.isFinite(req.body?.durationMs) ? req.body.durationMs : undefined;
+    const limit = Number.isFinite(req.body?.limit) ? req.body.limit : undefined;
+    const result = await services.diagnosis.enrichWithLiveTraces(req.params.id, { durationMs, limit });
+    res.json({ success: true, data: result });
+  }));
+
   // POST /api/findings/:id/correct — Generate AI correction
   router.post('/:id/correct', asyncHandler(async (req, res) => {
     const finding = await services.correction.generateCorrection(req.params.id);
