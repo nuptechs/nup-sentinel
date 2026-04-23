@@ -19,6 +19,7 @@ import { createSessionRoutes } from './routes/sessions.js';
 import { createFindingRoutes } from './routes/findings.js';
 import { createProjectRoutes } from './routes/projects.js';
 import { createWebhookEventRoutes } from './routes/webhook-events.js';
+import { createProbeWebhookRoutes } from './routes/probe-webhooks.js';
 import { createSentinelMCP } from '../mcp/server.js';
 import { metricsMiddleware, metricsEndpoint } from '../observability/prometheus-middleware.js';
 
@@ -132,6 +133,9 @@ export function createApp(services, adapters = null) {
     allowedHeaders: ['Content-Type', 'Authorization', 'Mcp-Session-Id', 'Last-Event-ID', 'X-Request-Id', 'X-Sentinel-SDK', 'X-Sentinel-Key', 'X-Sentinel-Session', 'X-Sentinel-Correlation', 'X-Sentinel-Source'],
   }));
   app.use(compression());
+  // Debug Probe webhook receiver — MUST be mounted before express.json so the
+  // raw body is available for HMAC verification. Auth is HMAC, not API key.
+  app.use('/api/probe-webhooks', createProbeWebhookRoutes());
   app.use(express.json({ limit: '60mb' }));
   app.use(requestId);
   app.use(metricsMiddleware);
@@ -214,6 +218,10 @@ export function createApp(services, adapters = null) {
       components,
     });
   });
+
+  // ── Debug Probe webhook receiver (HMAC auth — mounted before express.json
+  //    above so the raw body is available; this is a no-op spot kept for
+  //    documentation of middleware ordering). ──
 
   // ── Auth & rate limiting ────────────────────
   app.use('/api', apiKeyAuth);
