@@ -63,9 +63,9 @@ describe('MCPServer (legacy facade)', () => {
   // ── getToolDefinitions ────────────────────
 
   describe('getToolDefinitions', () => {
-    it('returns 10 tool definitions with JSON schema', () => {
+    it('returns 11 tool definitions with JSON schema', () => {
       const defs = mcp.getToolDefinitions();
-      assert.equal(defs.length, 10);
+      assert.equal(defs.length, 11);
       for (const def of defs) {
         assert.ok(def.name);
         assert.ok(def.description);
@@ -260,6 +260,37 @@ describe('MCPServer (legacy facade)', () => {
       const data = JSON.parse(result.content[0].text);
       assert.ok(data.error.includes('Unknown tool'));
     });
+
+    it('collect_live_traces returns collected events when trace adapter configured', async () => {
+      services.trace = {
+        isConfigured: () => true,
+        collectLive: async (sessionId, { durationMs, limit }) => {
+          assert.equal(sessionId, 's1');
+          assert.equal(durationMs, 200);
+          assert.equal(limit, 50);
+          return [{ type: 'http', path: '/api/foo' }, { type: 'sql', text: 'SELECT 1' }];
+        },
+      };
+      mcp = new MCPServer({ services });
+      const result = await mcp.executeTool('collect_live_traces', {
+        sessionId: 's1', durationMs: 200, limit: 50,
+      });
+      const data = JSON.parse(result.content[0].text);
+      assert.equal(data.sessionId, 's1');
+      assert.equal(data.count, 2);
+      assert.equal(data.events.length, 2);
+    });
+
+    it('collect_live_traces isError when trace adapter unconfigured', async () => {
+      services.trace = { isConfigured: () => false };
+      mcp = new MCPServer({ services });
+      const result = await mcp.executeTool('collect_live_traces', {
+        sessionId: 's1', durationMs: 200,
+      });
+      assert.equal(result.isError, true);
+      const data = JSON.parse(result.content[0].text);
+      assert.ok(data.error.includes('No trace adapter'));
+    });
   });
 
   // ── handleMessage ─────────────────────────
@@ -301,7 +332,7 @@ describe('MCPServer (legacy facade)', () => {
 
     it('handles tools/list', async () => {
       const result = await mcp.handleMessage({ id: 4, method: 'tools/list' });
-      assert.equal(result.result.tools.length, 10);
+      assert.equal(result.result.tools.length, 11);
     });
 
     it('handles tools/call → delegates to executeTool', async () => {

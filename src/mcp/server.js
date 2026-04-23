@@ -257,6 +257,29 @@ function buildToolRegistry(services) {
         return { projectId, path, source };
       },
     },
+    {
+      name: 'collect_live_traces',
+      title: 'Collect Live Traces (WebSocket)',
+      description: 'Subscribe to the trace adapter\'s realtime WebSocket bridge for a fixed window and return the collected events. Useful when the agent needs to observe what the backend does as the user reproduces an issue in real time. Falls back gracefully when the adapter lacks a live channel.',
+      inputSchema: {
+        sessionId: z.string().min(1).describe('The Sentinel session ID'),
+        durationMs: z.number().int().min(100).max(60_000).default(5000)
+          .describe('Collection window in ms (100–60000, default 5000)'),
+        limit: z.number().int().positive().max(1000).default(100)
+          .describe('Max events collected (default 100)'),
+      },
+      execute: async ({ sessionId, durationMs = 5000, limit = 100 }) => {
+        const trace = services.trace;
+        if (!trace || typeof trace.collectLive !== 'function' || !trace.isConfigured?.()) {
+          return {
+            payload: { error: 'No trace adapter configured', events: [] },
+            isError: true,
+          };
+        }
+        const events = await trace.collectLive(sessionId, { durationMs, limit });
+        return { sessionId, durationMs, count: events.length, events };
+      },
+    },
   ];
 }
 

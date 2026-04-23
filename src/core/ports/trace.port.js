@@ -68,6 +68,33 @@ export class TracePort {
     return () => {};
   }
 
+  /**
+   * Collect realtime trace events for a fixed window. Default
+   * implementation wires `subscribe()` + a timer; adapters may override
+   * for more efficient batched pulls.
+   *
+   * @param {string} sessionId
+   * @param {{durationMs?:number, limit?:number}} [options]
+   * @returns {Promise<object[]>}
+   */
+  async collectLive(sessionId, options = {}) {
+    const durationMs = Math.max(100, Math.min(60_000, options.durationMs ?? 5000));
+    const limit = Math.max(1, Math.min(1000, options.limit ?? 100));
+    const events = [];
+    const unsubscribe = await this.subscribe(sessionId, (event) => {
+      if (events.length < limit) events.push(event);
+    });
+    try {
+      await new Promise((resolve) => {
+        const t = setTimeout(resolve, durationMs);
+        if (typeof t?.unref === 'function') t.unref();
+      });
+    } finally {
+      try { await unsubscribe?.(); } catch { /* ignore */ }
+    }
+    return events;
+  }
+
   isConfigured() {
     return false;
   }
