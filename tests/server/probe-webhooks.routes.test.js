@@ -58,14 +58,26 @@ function get(server, path) {
 describe('Probe Webhook Receiver', () => {
   let server;
   let originalSecret;
+  let storage;
+  let sessionCalls;
 
   before(async () => {
     originalSecret = process.env.PROBE_WEBHOOK_SECRET;
     process.env.PROBE_WEBHOOK_SECRET = SECRET;
 
-    const storage = new MemoryStorageAdapter();
+    storage = new MemoryStorageAdapter();
+    sessionCalls = { getOrCreate: [], complete: [] };
     const mockServices = {
-      sessions: {},
+      sessions: {
+        async getOrCreate(sessionId, opts) {
+          sessionCalls.getOrCreate.push({ sessionId, ...opts });
+          return { id: sessionId };
+        },
+        async complete(sessionId) {
+          sessionCalls.complete.push(sessionId);
+          return { id: sessionId, status: 'completed' };
+        },
+      },
       findings: {},
       projects: {},
     };
@@ -151,6 +163,66 @@ describe('Probe Webhook Receiver', () => {
       'X-Probe-Signature': sig,
     });
     assert.equal(resp.status, 401);
+  });
+
+  it('persists delivery to storage and is idempotent on replay', async () => {
+    const payload = { event: 'session.created', data: { sessionId: 'sess-persist' }, deliveryId: 'd-persist' };
+    const raw = JSON.stringify(payload);
+    const ts = String(Math.floor(Date.now() / 1000));
+    const sig = signBody(SECRET, ts, raw);
+    const headers = {
+      'X-Probe-Event': 'session.created',
+      'X-Probe-Timestamp': ts,
+      'X-Probe-Signature': sig,
+      'X-Probe-Delivery': 'd-persist',
+    };
+
+    const r1 = await postRaw(server, '/api/probe-webhooks', raw, headers);
+    const r2 = await postRaw(server, '/api/probe-webhooks', raw, headers);
+    assert.equal(r1.status, 200);
+    assert.equal(r2.status, 200);
+
+    const inbox = await get(server, '/api/probe-webhooks');
+    assert.equal(inbox.body.data.persistent, true);
+    const matches = inbox.body.data.events.filter((e) => e.deliveryId === 'd-persist');
+    assert.equal(matches.length, 1, 'replay must not duplicate');
+  });
+
+  it('mirrors session.created and session.completed into SessionService', async () => {
+    const sessionId = 'sess-mirror';
+
+    // created
+    const createdPayload = { event: 'session.created', data: { sessionId }, deliveryId: 'd-mirror-1' };
+    const rawC = JSON.stringify(createdPayload);
+    const tsC = String(Math.floor(Date.now() / 1000));
+    await postRaw(server, '/api/probe-webhooks', rawC, {
+      'X-Probe-Event': 'session.created',
+      'X-Probe-Timestamp': tsC,
+      'X-Probe-Signature': signBody(SECRET, tsC, rawC),
+      'X-Probe-Delivery': 'd-mirror-1',
+    });
+
+    // completed
+    const completedPayload = { event: 'session.completed', data: { sessionId }, deliveryId: 'd-mirror-2' };
+    const rawD = JSON.stringify(completedPayload);
+    const tsD = String(Math.floor(Date.now() / 1000));
+    await postRaw(server, '/api/probe-webhooks', rawD, {
+      'X-Probe-Event': 'session.completed',
+      'X-Probe-Timestamp': tsD,
+      'X-Probe-Signature': signBody(SECRET, tsD, rawD),
+      'X-Probe-Delivery': 'd-mirror-2',
+    });
+
+    // Mirroring is best-effort and happens after the HTTP response;
+    // wait a tick for the microtask queue to drain.
+    await new Promise((r) => setImmediate(r));
+
+    const createdMatch = sessionCalls.getOrCreate.filter((c) => c.sessionId === sessionId);
+    assert.ok(createdMatch.length >= 1, 'getOrCreate must be called for session mirror');
+    assert.ok(
+      sessionCalls.complete.includes(sessionId),
+      'complete must be called for session.completed',
+    );
   });
 
   it('bypasses apiKeyAuth (no API key required)', async () => {

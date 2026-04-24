@@ -24,7 +24,7 @@ function makeAllAppliedPool() {
       if (queryCount === 2) {
         // Second call: SELECT version FROM sentinel_migrations
         // Return ALL known migration versions so the runner has nothing to do.
-        return { rows: [{ version: 1 }, { version: 2 }, { version: 3 }] };
+        return { rows: [{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }] };
       }
       return { rows: [] };
     },

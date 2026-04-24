@@ -95,6 +95,20 @@ export class StoragePort {
     throw new Error('StoragePort.listWebhookEvents() not implemented');
   }
 
+  // ── Probe inbound webhooks (optional) ──
+
+  async recordProbeWebhook(row) {
+    throw new Error('StoragePort.recordProbeWebhook() not implemented');
+  }
+
+  async listProbeWebhooks(options) {
+    throw new Error('StoragePort.listProbeWebhooks() not implemented');
+  }
+
+  async countProbeWebhooks() {
+    throw new Error('StoragePort.countProbeWebhooks() not implemented');
+  }
+
   // ── Lifecycle ─────────────────────────────
 
   async initialize() {

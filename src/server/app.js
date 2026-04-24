@@ -135,7 +135,10 @@ export function createApp(services, adapters = null) {
   app.use(compression());
   // Debug Probe webhook receiver — MUST be mounted before express.json so the
   // raw body is available for HMAC verification. Auth is HMAC, not API key.
-  app.use('/api/probe-webhooks', createProbeWebhookRoutes());
+  app.use('/api/probe-webhooks', createProbeWebhookRoutes({
+    storage: adapters?.storage || null,
+    services,
+  }));
   app.use(express.json({ limit: '60mb' }));
   app.use(requestId);
   app.use(metricsMiddleware);

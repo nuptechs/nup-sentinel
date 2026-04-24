@@ -17,6 +17,7 @@ export class MemoryStorageAdapter extends StoragePort {
     this.traces = new Map();           // Map<correlationId, trace>
     this.traceSessionIndex = new Map(); // Map<sessionId, Set<correlationId>>
     this.webhookEvents = new Map();
+    this.probeWebhooks = new Map(); // Map<deliveryId, row>
   }
 
   async createSession(session) {
@@ -191,7 +192,30 @@ export class MemoryStorageAdapter extends StoragePort {
     results.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     return results.slice(offset, offset + limit).map((r) => structuredClone(r));
   }
+// ── Probe inbound webhooks ─────────────────
 
+  async recordProbeWebhook(row) {
+    // Idempotent on deliveryId — a replay of the same delivery is a no-op.
+    if (row?.deliveryId && this.probeWebhooks.has(row.deliveryId)) {
+      return structuredClone(this.probeWebhooks.get(row.deliveryId));
+    }
+    const stored = structuredClone(row);
+    this.probeWebhooks.set(row.deliveryId || `auto-${this.probeWebhooks.size}`, stored);
+    return stored;
+  }
+
+  async listProbeWebhooks({ limit = 100, offset = 0, event } = {}) {
+    let results = [...this.probeWebhooks.values()];
+    if (event) results = results.filter((r) => r.event === event);
+    results.sort((a, b) => b.receivedAt - a.receivedAt);
+    return results.slice(offset, offset + limit).map((r) => structuredClone(r));
+  }
+
+  async countProbeWebhooks() {
+    return this.probeWebhooks.size;
+  }
+
+  
   isConfigured() {
     return true;
   }

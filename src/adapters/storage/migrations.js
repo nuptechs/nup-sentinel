@@ -141,6 +141,24 @@ const MIGRATIONS = [
         ON sentinel_webhook_events (created_at DESC);
     `,
   },
+  {
+    version: 4,
+    name: 'probe_webhooks',
+    sql: `
+      CREATE TABLE IF NOT EXISTS sentinel_probe_webhooks (
+        delivery_id   TEXT PRIMARY KEY,
+        event         TEXT NOT NULL,
+        timestamp     BIGINT NOT NULL,
+        received_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        payload       JSONB NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sentinel_probe_webhooks_received
+        ON sentinel_probe_webhooks (received_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_sentinel_probe_webhooks_event
+        ON sentinel_probe_webhooks (event, received_at DESC);
+    `,
+  },
 ];
 
 /**

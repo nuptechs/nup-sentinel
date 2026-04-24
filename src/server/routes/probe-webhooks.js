@@ -9,8 +9,17 @@
 // and sends `X-Probe-Signature: sha256=<hex>`. Timestamps older
 // than 5 minutes are rejected (anti-replay).
 //
-// In-memory ring buffer (last 100 events) is exposed via GET for
-// quick inspection; persistent storage can be added later.
+// Persistence: every accepted delivery is recorded in the storage
+// adapter (`recordProbeWebhook`) keyed by deliveryId (idempotent —
+// replays become no-ops). A small in-memory ring is kept as a cache
+// for low-latency GET inspection and as a fallback when storage
+// isn't wired (e.g. isolated tests).
+//
+// Side effects: for `session.created` and `session.completed`
+// events we mirror the Probe's session into Sentinel's own
+// SessionService (best-effort; failures are logged but never
+// fail the webhook ACK — we don't want the Probe to retry
+// legitimate deliveries just because our downstream hiccuped).
 // ─────────────────────────────────────────────
 
 import { Router, raw as expressRaw } from 'express';
@@ -19,16 +28,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 const MAX_BUFFER = 100;
 const MAX_SKEW_SECONDS = 300; // 5 minutes
 const MAX_BODY_BYTES = 1_048_576; // 1MB
-
-const buffer = [];
-let receivedTotal = 0;
-let rejectedTotal = 0;
-
-function pushEvent(entry) {
-  buffer.unshift(entry);
-  if (buffer.length > MAX_BUFFER) buffer.length = MAX_BUFFER;
-  receivedTotal += 1;
-}
+const DEFAULT_PROBE_PROJECT_ID = process.env.SENTINEL_PROBE_PROJECT_ID || 'debug-probe';
 
 function sign(secret, timestamp, rawBody) {
   const hmac = createHmac('sha256', secret);
@@ -43,20 +43,83 @@ function timingSafeEqualStrings(a, b) {
   return timingSafeEqual(bufA, bufB);
 }
 
-export function createProbeWebhookRoutes(logger = console) {
+/**
+ * @param {object} [deps]
+ * @param {import('../../core/ports/storage.port.js').StoragePort} [deps.storage]
+ * @param {{sessions?: any}} [deps.services]
+ * @param {{info?: Function, warn?: Function, error?: Function}} [deps.logger]
+ */
+export function createProbeWebhookRoutes({ storage = null, services = null, logger = console } = {}) {
   const router = Router();
   const secret = process.env.PROBE_WEBHOOK_SECRET;
 
-  // GET /api/probe-webhooks — inspect recent deliveries (public; no secrets exposed)
-  router.get('/', (_req, res) => {
+  // Ring buffer — cache for GET + fallback when storage is absent.
+  const buffer = [];
+  let receivedTotal = 0;
+  let rejectedTotal = 0;
+
+  function pushBuffer(entry) {
+    buffer.unshift(entry);
+    if (buffer.length > MAX_BUFFER) buffer.length = MAX_BUFFER;
+  }
+
+  async function mirrorSession(event, payload) {
+    if (!services?.sessions || typeof services.sessions.getOrCreate !== 'function') return;
+    const sessionId = payload?.data?.sessionId;
+    if (!sessionId) return;
+
+    try {
+      if (event === 'session.created') {
+        await services.sessions.getOrCreate(sessionId, {
+          projectId: DEFAULT_PROBE_PROJECT_ID,
+          source: 'debug-probe',
+        });
+      } else if (event === 'session.completed') {
+        await services.sessions.getOrCreate(sessionId, {
+          projectId: DEFAULT_PROBE_PROJECT_ID,
+          source: 'debug-probe',
+        });
+        if (typeof services.sessions.complete === 'function') {
+          await services.sessions.complete(sessionId).catch(() => {});
+        }
+      }
+    } catch (err) {
+      if (typeof logger.warn === 'function') {
+        logger.warn(
+          { event, sessionId, err: err.message },
+          '[Probe Webhook] session mirror failed (non-fatal)',
+        );
+      }
+    }
+  }
+
+  // GET /api/probe-webhooks — inspect recent deliveries
+  router.get('/', async (_req, res) => {
+    let events = buffer;
+    let totalPersisted = null;
+
+    if (storage && typeof storage.listProbeWebhooks === 'function') {
+      try {
+        events = await storage.listProbeWebhooks({ limit: MAX_BUFFER });
+        totalPersisted = await storage.countProbeWebhooks?.().catch(() => null);
+      } catch (err) {
+        if (typeof logger.warn === 'function') {
+          logger.warn({ err: err.message }, '[Probe Webhook] storage GET failed, using buffer');
+        }
+        events = buffer;
+      }
+    }
+
     res.json({
       success: true,
       data: {
         configured: Boolean(secret),
+        persistent: Boolean(storage && typeof storage.recordProbeWebhook === 'function'),
         receivedTotal,
         rejectedTotal,
         bufferSize: buffer.length,
-        events: buffer,
+        totalPersisted,
+        events,
       },
     });
   });
@@ -65,7 +128,7 @@ export function createProbeWebhookRoutes(logger = console) {
   router.post(
     '/',
     expressRaw({ type: '*/*', limit: MAX_BODY_BYTES }),
-    (req, res) => {
+    async (req, res) => {
       if (!secret) {
         rejectedTotal += 1;
         return res.status(503).json({ success: false, error: 'PROBE_WEBHOOK_SECRET not configured' });
@@ -116,7 +179,24 @@ export function createProbeWebhookRoutes(logger = console) {
         receivedAt: Date.now(),
         payload,
       };
-      pushEvent(entry);
+
+      // Always keep the cache populated
+      pushBuffer(entry);
+      receivedTotal += 1;
+
+      // Persist (idempotent); failures must not reject the delivery.
+      if (storage && typeof storage.recordProbeWebhook === 'function') {
+        try {
+          await storage.recordProbeWebhook(entry);
+        } catch (err) {
+          if (typeof logger.warn === 'function') {
+            logger.warn({ err: err.message, deliveryId }, '[Probe Webhook] persist failed (non-fatal)');
+          }
+        }
+      }
+
+      // Mirror domain side-effects (best-effort, non-blocking)
+      mirrorSession(event, payload).catch(() => {});
 
       if (typeof logger.info === 'function') {
         logger.info({ event, deliveryId }, '[Probe Webhook] delivered');

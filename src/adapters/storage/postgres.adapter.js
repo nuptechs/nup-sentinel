@@ -395,6 +395,56 @@ export class PostgresStorageAdapter extends StoragePort {
     return rows.map((r) => this._mapWebhookEvent(r));
   }
 
+  // ── Probe inbound webhooks ─────────────────
+
+  async recordProbeWebhook(row) {
+    // Idempotent on delivery_id — replays become no-ops.
+    const { rows } = await this.pool.query(
+      `INSERT INTO sentinel_probe_webhooks (delivery_id, event, timestamp, received_at, payload)
+       VALUES ($1, $2, $3, to_timestamp($4 / 1000.0), $5)
+       ON CONFLICT (delivery_id) DO NOTHING
+       RETURNING *`,
+      [row.deliveryId, row.event, row.timestamp, row.receivedAt, JSON.stringify(row.payload)]
+    );
+    return rows[0] ? this._mapProbeWebhook(rows[0]) : { ...row, duplicate: true };
+  }
+
+  async listProbeWebhooks({ limit = 100, offset = 0, event } = {}) {
+    const conditions = [];
+    const params = [];
+    let idx = 1;
+    if (event) {
+      conditions.push(`event = $${idx}`);
+      params.push(event);
+      idx++;
+    }
+    params.push(limit, offset);
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const { rows } = await this.pool.query(
+      `SELECT * FROM sentinel_probe_webhooks
+       ${where}
+       ORDER BY received_at DESC
+       LIMIT $${idx} OFFSET $${idx + 1}`,
+      params
+    );
+    return rows.map((r) => this._mapProbeWebhook(r));
+  }
+
+  async countProbeWebhooks() {
+    const { rows } = await this.pool.query(`SELECT COUNT(*)::int AS c FROM sentinel_probe_webhooks`);
+    return rows[0]?.c ?? 0;
+  }
+
+  _mapProbeWebhook(row) {
+    return {
+      deliveryId: row.delivery_id,
+      event: row.event,
+      timestamp: Number(row.timestamp),
+      receivedAt: row.received_at instanceof Date ? row.received_at.getTime() : Number(row.received_at),
+      payload: row.payload,
+    };
+  }
+
   isConfigured() {
     return !!this.pool;
   }
