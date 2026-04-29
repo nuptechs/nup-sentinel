@@ -188,6 +188,51 @@ const MIGRATIONS = [
         ON sentinel_findings (confidence) WHERE confidence IS NOT NULL;
     `,
   },
+  {
+    // Multi-tenancy via Identify orgs. Sentinel does NOT duplicate the
+    // tenant table — `organization_id` here is a foreign key (logical) into
+    // NuPIdentify.organizations.id. The Sentinel-owned table that's new is
+    // `sentinel_projects` (a project = a repo/app analyzed by the Sentinel
+    // pipelines). Refs: ADR 0003.
+    version: 6,
+    name: 'multi_tenant_via_identify',
+    sql: `
+      CREATE TABLE IF NOT EXISTS sentinel_projects (
+        id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        organization_id  TEXT NOT NULL,
+        name             TEXT NOT NULL,
+        slug             TEXT NOT NULL,
+        repo_url         TEXT,
+        default_branch   TEXT NOT NULL DEFAULT 'main',
+        description      TEXT,
+        status           TEXT NOT NULL DEFAULT 'active',
+        settings         JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (organization_id, slug)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sentinel_projects_org
+        ON sentinel_projects (organization_id, status);
+
+      -- Findings now carry organization_id for tenant isolation; nullable
+      -- because pre-migration rows pre-date tenancy. New rows MUST set it.
+      ALTER TABLE sentinel_findings
+        ADD COLUMN IF NOT EXISTS organization_id TEXT;
+
+      ALTER TABLE sentinel_sessions
+        ADD COLUMN IF NOT EXISTS organization_id TEXT;
+
+      ALTER TABLE sentinel_events
+        ADD COLUMN IF NOT EXISTS organization_id TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_sentinel_findings_org
+        ON sentinel_findings (organization_id, created_at DESC) WHERE organization_id IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_sentinel_sessions_org
+        ON sentinel_sessions (organization_id, created_at DESC) WHERE organization_id IS NOT NULL;
+    `,
+  },
 ];
 
 /**
