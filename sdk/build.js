@@ -70,7 +70,7 @@ async function run() {
 }
 
 function generateTypeDeclarations() {
-  return `// Auto-generated type declarations for @nuptech/sentinel/sdk
+  return `// Auto-generated type declarations for @nuptechs/sentinel/sdk
 // See src/sdk/index.js for full documentation
 
 export interface SentinelInitOptions {

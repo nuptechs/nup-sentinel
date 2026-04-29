@@ -3,7 +3,7 @@
 // Sentry-style modular integration architecture.
 //
 // Usage:
-//   import { init, RecorderIntegration, MediaIntegration, AnnotatorIntegration } from '@nuptech/sentinel/sdk';
+//   import { init, RecorderIntegration, MediaIntegration, AnnotatorIntegration } from '@nuptechs/sentinel/sdk';
 //
 //   const sentinel = await init({
 //     serverUrl: 'https://sentinel.example.com',
