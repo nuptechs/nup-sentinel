@@ -159,6 +159,35 @@ const MIGRATIONS = [
         ON sentinel_probe_webhooks (event, received_at DESC);
     `,
   },
+  {
+    // Finding schema v2 — additive columns. Old findings (without these
+    // fields populated) are read back as v1 and migrated lazily by
+    // `migrateV1ToV2`. Refs: PLANO-EXECUCAO-AGENTE Onda 0 / Tarefa 0.2.
+    version: 5,
+    name: 'finding_schema_v2',
+    sql: `
+      ALTER TABLE sentinel_findings
+        ADD COLUMN IF NOT EXISTS schema_version  TEXT NOT NULL DEFAULT '2.0.0',
+        ADD COLUMN IF NOT EXISTS subtype         TEXT,
+        ADD COLUMN IF NOT EXISTS confidence      TEXT,
+        ADD COLUMN IF NOT EXISTS evidences       JSONB NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS symbol_ref      JSONB;
+
+      -- Existing rows pre-date v2 — mark them v1 so the read path migrates lazily.
+      UPDATE sentinel_findings SET schema_version = '1.0.0' WHERE schema_version = '2.0.0' AND created_at < NOW();
+
+      -- Index on the symbolRef.identifier used by the correlator's cross-source matching.
+      CREATE INDEX IF NOT EXISTS idx_sentinel_findings_symbol_identifier
+        ON sentinel_findings ((symbol_ref->>'identifier'))
+        WHERE symbol_ref IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_sentinel_findings_subtype
+        ON sentinel_findings (subtype) WHERE subtype IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_sentinel_findings_confidence
+        ON sentinel_findings (confidence) WHERE confidence IS NOT NULL;
+    `,
+  },
 ];
 
 /**
