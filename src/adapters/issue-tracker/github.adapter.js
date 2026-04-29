@@ -79,7 +79,7 @@ export class GitHubIssueAdapter extends IssueTrackerPort {
     if (metadata.correction?.summary) {
       sections.push(`### Suggested Fix\n\n${metadata.correction.summary}`);
     }
-    sections.push(`\n---\n*Created by [Sentinel](https://github.com/nuptechs/sentinel) — AI-powered QA*`);
+    sections.push(`\n---\n*Created by [Sentinel](https://github.com/nuptechs/nup-sentinel) — AI-powered QA*`);
     return sections.join('\n\n');
   }
 

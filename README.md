@@ -99,7 +99,7 @@ Tables are created automatically on first run.
 ## Browser SDK
 
 ```javascript
-import { init } from '@nuptech/sentinel/sdk';
+import { init } from '@nuptechs/sentinel/sdk';
 
 const sentinel = await init({
   serverUrl: 'http://localhost:3900',
@@ -126,7 +126,7 @@ await sentinel.stop();
 ### Custom Adapter
 
 ```javascript
-import { AIPort } from '@nuptech/sentinel';
+import { AIPort } from '@nuptechs/sentinel';
 
 class MyAIAdapter extends AIPort {
   async diagnose(context) { /* ... */ }
@@ -138,7 +138,7 @@ class MyAIAdapter extends AIPort {
 ### Custom Container
 
 ```javascript
-import { createApp } from '@nuptech/sentinel';
+import { createApp } from '@nuptechs/sentinel';
 // wire your own services, pass to createApp(services)
 ```
 
