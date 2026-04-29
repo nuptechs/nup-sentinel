@@ -1,8 +1,8 @@
 {
-  "name": "@nuptech/sentinel",
-  "version": "0.2.0",
+  "name": "@nuptechs/sentinel",
+  "version": "0.3.0",
   "type": "module",
-  "description": "QA capture → diagnosis → correction pipeline with hexagonal architecture",
+  "description": "NuP Sentinel — Code Intelligence platform consolidating Code/Manifest/Probe/QA/Semantic into a single correlator (hexagonal architecture)",
   "exports": {
     ".": "./src/index.js",
     "./core/*": "./src/core/*.js",
