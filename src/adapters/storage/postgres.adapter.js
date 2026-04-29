@@ -146,8 +146,9 @@ export class PostgresStorageAdapter extends StoragePort {
         title, description, page_url, css_selector, screenshot_url,
         annotation, browser_context, backend_context, code_context,
         diagnosis, correction, created_at, updated_at,
-        correlation_id, debug_probe_session_id, manifest_project_id, manifest_run_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
+        correlation_id, debug_probe_session_id, manifest_project_id, manifest_run_id,
+        schema_version, subtype, confidence, evidences, symbol_ref)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
       [
         finding.id, finding.sessionId, finding.projectId,
         finding.source, finding.type, finding.severity, finding.status,
@@ -161,6 +162,11 @@ export class PostgresStorageAdapter extends StoragePort {
         finding.debugProbeSessionId || null,
         finding.manifestProjectId || null,
         finding.manifestRunId || null,
+        finding.schemaVersion || '2.0.0',
+        finding.subtype || null,
+        finding.confidence || null,
+        this._json(finding.evidences ?? []),
+        this._json(finding.symbolRef),
       ]
     );
     return finding;
@@ -178,13 +184,18 @@ export class PostgresStorageAdapter extends StoragePort {
       `UPDATE sentinel_findings
        SET status = $2, severity = $3, description = $4,
            browser_context = $5, backend_context = $6, code_context = $7,
-           diagnosis = $8, correction = $9, updated_at = $10
+           diagnosis = $8, correction = $9, updated_at = $10,
+           subtype = $11, confidence = $12, evidences = $13, symbol_ref = $14
        WHERE id = $1`,
       [
         finding.id, finding.status, finding.severity, finding.description,
         this._json(finding.browserContext), this._json(finding.backendContext),
         this._json(finding.codeContext), this._json(finding.diagnosis),
         this._json(finding.correction), finding.updatedAt,
+        finding.subtype || null,
+        finding.confidence || null,
+        this._json(finding.evidences ?? []),
+        this._json(finding.symbolRef),
       ]
     );
     return finding;
@@ -526,6 +537,13 @@ export class PostgresStorageAdapter extends StoragePort {
       debugProbeSessionId: row.debug_probe_session_id || null,
       manifestProjectId: row.manifest_project_id || null,
       manifestRunId: row.manifest_run_id || null,
+      // v2 fields — null/[] when row pre-dates the migration; class defaults
+      // back-fill the schema version constant so reads behave consistently.
+      schemaVersion: row.schema_version || undefined,
+      subtype: row.subtype || null,
+      confidence: row.confidence || null,
+      evidences: Array.isArray(row.evidences) ? row.evidences : [],
+      symbolRef: row.symbol_ref || null,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
     });

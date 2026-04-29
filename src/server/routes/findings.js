@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../middleware/error-handler.js';
 import { ValidationError, NotFoundError } from '../../core/errors.js';
 import { autoProcessTotal } from '../../observability/metrics.js';
+import { FindingV2Schema, parseFinding } from '../../core/domain/finding.schema.js';
 
 // Retry once on transient failure with small backoff
 async function runWithRetry(fn, stage, findingId) {
@@ -115,6 +116,45 @@ export function createFindingRoutes(services) {
     });
 
     res.status(201).json({ success: true, data: finding.toJSON() });
+  }));
+
+  // POST /api/findings/ingest — Schema v2 ingestion endpoint.
+  // Accepts a single finding object or an array. Both v1 and v2 payloads work
+  // (v1 is auto-migrated by `parseFinding`). Source modules (Code/Manifest/
+  // Probe/QA/Semantic) all hit this endpoint with their findings; the
+  // correlator picks them up asynchronously to merge by symbolRef.
+  router.post('/ingest', asyncHandler(async (req, res) => {
+    const items = Array.isArray(req.body) ? req.body : [req.body];
+    if (items.length === 0) throw new ValidationError('payload must be a finding object or non-empty array');
+
+    const validated = [];
+    const errors = [];
+    items.forEach((item, idx) => {
+      try {
+        validated.push(parseFinding(item));
+      } catch (err) {
+        const issues = err?.issues?.map((i) => `${i.path.join('.')}: ${i.message}`) || [err?.message];
+        errors.push({ index: idx, issues });
+      }
+    });
+
+    if (errors.length > 0 && validated.length === 0) {
+      throw new ValidationError(`all items failed validation: ${JSON.stringify(errors)}`);
+    }
+
+    const created = [];
+    for (const payload of validated) {
+      const finding = await services.findings.create(payload);
+      created.push(finding.toJSON());
+    }
+
+    res.status(201).json({
+      success: true,
+      data: created,
+      acceptedCount: created.length,
+      rejectedCount: errors.length,
+      rejected: errors,
+    });
   }));
 
   // GET /api/findings/:id — Get finding details
