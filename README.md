@@ -1,6 +1,15 @@
-# Sentinel
+# NuP Sentinel
 
-QA capture → diagnosis → correction pipeline.
+> Code Intelligence platform consolidating 5 tools (Code, Manifest, Probe, QA, Semantic) into a single correlator that closes 5 vacancies no commercial competitor covers.
+
+The package on npm is `@nuptechs/sentinel`. Domain: `sentinel.nuptechs.com`. Module repos:
+- [`nup-sentinel-code`](https://github.com/nuptechs/nup-sentinel-code) — AST/graph analyzer
+- [`nup-sentinel-manifest`](https://github.com/nuptechs/nup-sentinel-manifest) — auth/schema analyzer
+- [`nup-sentinel-probe`](https://github.com/nuptechs/nup-sentinel-probe) — runtime capture
+
+## What this repo is
+
+The Sentinel SaaS / SDK / MCP server. Originally a QA capture + diagnosis pipeline; now also the central correlator that ingests findings from the 5 modules, deduplicates by `symbolRef`, computes confidence as more sources confirm, and emits actionable remediations.
 
 Captures browser events (DOM, network, console, errors) and user annotations during QA sessions, correlates with backend traces via Manifest static analysis, uses AI to diagnose root causes and propose code corrections.
 
