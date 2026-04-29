@@ -6,7 +6,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../middleware/error-handler.js';
 import { ValidationError, NotFoundError } from '../../core/errors.js';
 import { autoProcessTotal } from '../../observability/metrics.js';
-import { FindingV2Schema, parseFinding } from '../../core/domain/finding.schema.js';
+import { parseFinding } from '../../core/domain/finding.schema.js';
 
 // Retry once on transient failure with small backoff
 async function runWithRetry(fn, stage, findingId) {
