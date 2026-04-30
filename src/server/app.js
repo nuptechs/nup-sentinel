@@ -22,6 +22,7 @@ import { createProjectCrudRoutes } from './routes/project-crud.routes.js';
 import { createDriftRoutes } from './routes/drift.routes.js';
 import { createWebhookEventRoutes } from './routes/webhook-events.js';
 import { createProbeWebhookRoutes } from './routes/probe-webhooks.js';
+import { createIdentifyWebhookRoutes } from './routes/identify-webhooks.routes.js';
 import { createOidcAuthMiddleware } from './middleware/oidc-auth.js';
 import { createSentinelMCP } from '../mcp/server.js';
 import { metricsMiddleware, metricsEndpoint } from '../observability/prometheus-middleware.js';
@@ -142,6 +143,19 @@ export function createApp(services, adapters = null) {
     storage: adapters?.storage || null,
     services,
   }));
+
+  // Identify lifecycle webhooks — also mounted BEFORE express.json so the
+  // raw body is available for HMAC signature verification. Auth is HMAC,
+  // not API key (Identify never holds Sentinel keys). Active only when
+  // an IdentifyClient is wired (otherwise there's no cache to invalidate).
+  if (adapters?.identifyClient) {
+    app.use(
+      '/api/webhooks/identify',
+      express.raw({ type: '*/*', limit: '1mb' }),
+      createIdentifyWebhookRoutes({ identifyClient: adapters.identifyClient }),
+    );
+  }
+
   app.use(express.json({ limit: '60mb' }));
   app.use(requestId);
   app.use(metricsMiddleware);
