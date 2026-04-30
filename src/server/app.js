@@ -18,8 +18,11 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import { createSessionRoutes } from './routes/sessions.js';
 import { createFindingRoutes } from './routes/findings.js';
 import { createProjectRoutes } from './routes/projects.js';
+import { createProjectCrudRoutes } from './routes/project-crud.routes.js';
+import { createDriftRoutes } from './routes/drift.routes.js';
 import { createWebhookEventRoutes } from './routes/webhook-events.js';
 import { createProbeWebhookRoutes } from './routes/probe-webhooks.js';
+import { createOidcAuthMiddleware } from './middleware/oidc-auth.js';
 import { createSentinelMCP } from '../mcp/server.js';
 import { metricsMiddleware, metricsEndpoint } from '../observability/prometheus-middleware.js';
 
@@ -241,6 +244,33 @@ export function createApp(services, adapters = null) {
   app.use('/api/sessions', createSessionRoutes(services));
   app.use('/api/findings', createFindingRoutes(services));
   app.use('/api/projects', createProjectRoutes(services));
+
+  // Tenant-scoped routes — require OIDC bearer token resolved against
+  // NuPIdentify (ADR 0003). The middleware decorates req.user/orgId/token
+  // and the route handlers gate further on permissions and ReBAC.
+  // Mounted only when an IdentifyClient is wired in adapters; otherwise
+  // these endpoints stay disabled (legacy single-tenant deployments).
+  if (adapters?.identifyClient && services?.projectStorage) {
+    const oidcAuth = createOidcAuthMiddleware({ identifyClient: adapters.identifyClient });
+    app.use(
+      '/api/projects',
+      oidcAuth,
+      createProjectCrudRoutes({
+        projectStorage: services.projectStorage,
+        identifyClient: adapters.identifyClient,
+      }),
+    );
+    app.use(
+      '/api/projects',
+      oidcAuth,
+      createDriftRoutes({
+        permissionDriftService: services.permissionDrift,
+        tripleOrphanDetector: services.tripleOrphan,
+        identifyClient: adapters.identifyClient,
+      }),
+    );
+  }
+
   if (adapters) {
     app.use('/api/webhook-events', createWebhookEventRoutes(adapters));
   }
