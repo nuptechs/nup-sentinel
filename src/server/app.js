@@ -281,6 +281,7 @@ export function createApp(services, adapters = null) {
         permissionDriftService: services.permissionDrift,
         tripleOrphanDetector: services.tripleOrphan,
         flagDeadBranchService: services.flagDeadBranch,
+        adversarialConfirmer: services.adversarialConfirmer,
         identifyClient: adapters.identifyClient,
       }),
     );
