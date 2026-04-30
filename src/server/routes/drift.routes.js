@@ -19,6 +19,7 @@ export function createDriftRoutes({
   permissionDriftService,
   tripleOrphanDetector,
   flagDeadBranchService,
+  adversarialConfirmer,
   identifyClient,
 }) {
   const router = Router();
@@ -156,6 +157,52 @@ export function createDriftRoutes({
           promotedCount: result.promoted.length,
           skippedExisting: result.skippedExisting,
           promoted: result.promoted.map((f) => f.toJSON()),
+        },
+      });
+    }),
+  );
+
+  /**
+   * POST /api/projects/:projectId/adversarial-confirm/run
+   * Onda 4 / Vácuo 4 — actively reproduces (or disconfirms) static
+   * findings via runtime probes. Findings whose probe passes get
+   * confidence='adversarial_confirmed' (the strongest Sentinel signal).
+   *
+   * Body (optional):
+   *   { "context": { "baseUrl": "https://app.example.com" } }
+   *
+   * Returns confirmed + disconfirmed findings + stats. Skipped findings
+   * are not emitted in the response (no probe registered, already
+   * confirmed, etc) but their counts are in `stats`.
+   */
+  router.post(
+    '/:projectId/adversarial-confirm/run',
+    requirePermission('sentinel.findings.write', { identifyClient }),
+    requireProjectMembership({ identifyClient, paramName: 'projectId' }),
+    asyncHandler(async (req, res) => {
+      if (!adversarialConfirmer) {
+        return res.status(503).json({
+          success: false,
+          error: 'adversarial_confirmer_unavailable',
+          message: 'AdversarialConfirmerService is not wired in this deployment.',
+        });
+      }
+
+      const context = (req.body && req.body.context) || {};
+      const result = await adversarialConfirmer.run({
+        organizationId: req.organizationId,
+        projectId: req.params.projectId,
+        context,
+      });
+
+      res.status(200).json({
+        success: true,
+        data: {
+          stats: result.stats,
+          confirmedCount: result.confirmed.length,
+          disconfirmedCount: result.disconfirmed.length,
+          confirmed: result.confirmed.map((f) => f.toJSON()),
+          disconfirmed: result.disconfirmed.map((f) => f.toJSON()),
         },
       });
     }),
