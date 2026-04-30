@@ -119,24 +119,69 @@ export function createFindingRoutes(services) {
   }));
 
   // POST /api/findings/ingest — Schema v2 ingestion endpoint.
-  // Accepts a single finding object or an array. Both v1 and v2 payloads work
-  // (v1 is auto-migrated by `parseFinding`). Source modules (Code/Manifest/
-  // Probe/QA/Semantic) all hit this endpoint with their findings; the
-  // correlator picks them up asynchronously to merge by symbolRef.
+  //
+  // Accepts a single finding object or an array. v1 payloads are auto-
+  // migrated by parseFinding. Emitters (Code/Manifest/Probe/QA/Semantic)
+  // all hit this endpoint; the correlator merges by symbolRef.
+  //
+  // Cross-tenant safety: when the calling API key is tenant-scoped (set
+  // via SENTINEL_API_KEY="key:orgId,..." in the env), the route enforces
+  // that EVERY payload's organizationId equals the key's bound org. A
+  // forged organizationId in the body is rejected with 403, not silently
+  // persisted into another tenant's bucket. When the API key is tenant-
+  // agnostic (legacy single-tenant deployments) this check is skipped.
   router.post('/ingest', asyncHandler(async (req, res) => {
     const items = Array.isArray(req.body) ? req.body : [req.body];
     if (items.length === 0) throw new ValidationError('payload must be a finding object or non-empty array');
 
+    const boundOrgId = req.apiKeyOrganizationId; // null when key isn't tenant-scoped
+
     const validated = [];
     const errors = [];
     items.forEach((item, idx) => {
+      // Tenant scope enforcement runs BEFORE schema validation so
+      // forged orgs always 403, even when the rest of the payload is bad.
+      if (boundOrgId) {
+        const claimed = item && typeof item === 'object' ? item.organizationId : null;
+        if (!claimed) {
+          errors.push({
+            index: idx,
+            code: 'organizationId_required',
+            issues: [`organizationId is required when the API key is tenant-scoped (bound to "${boundOrgId}")`],
+          });
+          return;
+        }
+        if (claimed !== boundOrgId) {
+          errors.push({
+            index: idx,
+            code: 'organizationId_mismatch',
+            issues: [
+              `payload organizationId="${claimed}" does not match the API key's bound org="${boundOrgId}"`,
+            ],
+          });
+          return;
+        }
+      }
       try {
         validated.push(parseFinding(item));
       } catch (err) {
         const issues = err?.issues?.map((i) => `${i.path.join('.')}: ${i.message}`) || [err?.message];
-        errors.push({ index: idx, issues });
+        errors.push({ index: idx, code: 'validation_error', issues });
       }
     });
+
+    // If any item failed because of a tenant-scope mismatch, reject the
+    // WHOLE batch with 403 (don't accept the well-formed half — a single
+    // forged item is enough signal to fail loudly).
+    if (errors.some((e) => e.code === 'organizationId_mismatch' || e.code === 'organizationId_required')) {
+      return res.status(403).json({
+        success: false,
+        error: 'tenant_scope_violation',
+        message:
+          'one or more items failed tenant-scope enforcement; the whole batch was rejected',
+        rejected: errors,
+      });
+    }
 
     if (errors.length > 0 && validated.length === 0) {
       throw new ValidationError(`all items failed validation: ${JSON.stringify(errors)}`);

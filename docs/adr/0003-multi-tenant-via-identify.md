@@ -88,3 +88,54 @@ Fase 2: SCIM provisioning completo + OIDC externo (Auth0/Okta como IdP do Identi
 - Tabela `sentinel_projects` (orgId, repoUrl, defaultBranch, etc) — esta sessão.
 - IdentifyClient adapter consumindo `/api/auth/me`, `/api/permissions/check`, `/api/rebac/check` — Onda 1.
 - Middleware OIDC validando token e populando `req.organizationId` — esta sessão.
+
+## §5 — Tenant scoping para o ingest endpoint (apikey contract)
+
+`POST /api/findings/ingest` é gated por `apiKeyAuth` (machine-to-machine, **não** OIDC) porque os emitters (nup-sentinel-code, nup-sentinel-manifest, nup-sentinel-probe) rodam sem sessão de usuário. Sem regra adicional, qualquer key válida poderia escrever findings com qualquer `organizationId` no payload — vazamento cross-tenant trivial.
+
+### Contrato
+
+`SENTINEL_API_KEY` aceita dois formatos no env:
+
+```
+# 1. Tenant-agnostic (legacy, single-tenant deployment)
+SENTINEL_API_KEY="key1,key2"
+
+# 2. Tenant-scoped (recomendado para multi-tenant)
+SENTINEL_API_KEY="key-A:org-A,key-B:org-B,fallback"
+```
+
+Cada key separada por vírgula. `key:org` binda a key a uma `organizationId` específica do Identify.
+
+### Enforcement
+
+Quando o middleware `apiKeyAuth` autentica uma key tenant-scoped, decora `req.apiKeyOrganizationId`. O handler de `/api/findings/ingest` então:
+
+1. Se `req.apiKeyOrganizationId` está setado **e** algum item do payload omite `organizationId` → 403 `organizationId_required`.
+2. Se `req.apiKeyOrganizationId` está setado **e** algum item do payload tem `organizationId !== req.apiKeyOrganizationId` → 403 `organizationId_mismatch`.
+3. Em ambos os casos acima, **o batch INTEIRO é rejeitado** (atomic) — uma única tentativa de forge é sinal suficiente pra falhar loud, não pra aceitar a metade boa.
+4. Se key é tenant-agnostic (formato legacy), enforcement é skipado — comportamento backwards-compatible.
+
+### Provisioning de keys
+
+Cada cliente Sentinel em produção tem sua própria key. A criação/rotação roda por script no Identify quando o tenant é onboarded:
+
+```bash
+# pseudo-comando — implementação fica em scripts/provision-sentinel-key.js
+node scripts/provision-sentinel-key.js \
+  --identify-url https://identify.nuptechs.com \
+  --identify-admin-token $ADMIN_TOKEN \
+  --org-id <org-uuid>
+# → printa key + adiciona "key:<orgId>" ao SENTINEL_API_KEY
+```
+
+### O que isso NÃO cobre
+
+- Não valida que `org-A` realmente existe no Identify (não há round-trip por request). O onboarding script garante isso na criação da key. Se o Identify deletar a org depois, a key ainda funciona até ser rotacionada.
+- Não impede o Sentinel de aceitar findings com `organizationId` setado pra uma org desativada. Listas de orgs ativas são responsabilidade do Identify.
+
+### Próximas tarefas para hardening (futuras)
+
+- Cache LRU local de orgs ativas via `IdentifyClient.getTenant()`, com invalidação por evento (Identify webhook).
+- Rotation cerimônia: `key-A:org-A,old-key-A:org-A` durante grace window.
+- Audit log dos rejects 403 (já há log de errors no error-handler; classificar e expor em métrica Prometheus).

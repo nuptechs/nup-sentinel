@@ -246,6 +246,10 @@ export class Finding {
       confidence: this.confidence,
       evidences: this.evidences,
       symbolRef: this.symbolRef,
+      // organizationId is attached post-construction (storage adapter,
+      // route on ingest, etc). Surface on the wire so consumers can
+      // filter by tenant without an extra round-trip.
+      organizationId: this.organizationId ?? null,
       createdAt: this.createdAt.toISOString(),
       updatedAt: this.updatedAt.toISOString(),
     };

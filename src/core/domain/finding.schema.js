@@ -84,6 +84,11 @@ export const FindingV2Schema = z.object({
     .optional(),
   evidences: z.array(EvidenceSchema).optional(),
   symbolRef: SymbolRefSchema.nullable().optional(),
+
+  // Tenant scope tag — preserved through validation so the route can
+  // enforce apikey-bound tenant on ingest. It is a logical FK into
+  // NuPIdentify.organizations.id (no DB constraint cross-service).
+  organizationId: z.string().nullable().optional(),
 });
 
 export const FindingIngestPayloadSchema = z.union([FindingV2Schema, z.array(FindingV2Schema)]);
