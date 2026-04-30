@@ -111,7 +111,9 @@ export class Finding {
     this.schemaVersion = props.schemaVersion || FINDING_SCHEMA_VERSION;
     this.subtype = props.subtype || null;
     this.confidence = props.confidence || null;
-    this.evidences = Array.isArray(props.evidences) ? props.evidences : [];
+    // Clone evidences so subsequent mutations on the Finding (addEvidence,
+    // correlator merges) don't leak back into the caller's payload.
+    this.evidences = Array.isArray(props.evidences) ? [...props.evidences] : [];
     this.symbolRef = props.symbolRef || null;
 
     this.createdAt = props.createdAt || new Date();
