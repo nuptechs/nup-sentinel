@@ -7,6 +7,23 @@ The package on npm is `@nuptechs/sentinel`. Domain: `sentinel.nuptechs.com`. Mod
 - [`nup-sentinel-manifest`](https://github.com/nuptechs/nup-sentinel-manifest) — auth/schema analyzer
 - [`nup-sentinel-probe`](https://github.com/nuptechs/nup-sentinel-probe) — runtime capture
 
+## North star
+
+The plan is anchored to **[`docs/MATRIZ-COMPETITIVA.md`](docs/MATRIZ-COMPETITIVA.md)** — 18 market axes + 5 verified vacancies vs CodeQL/Sourcegraph/Sonar/Endor/Sentry/Datadog/Snyk/knip. Coverage today: **9/23**. Coverage at completion: **23/23**. Every wave landed below maps back to one of those rows.
+
+| Wave | Vacancy | Detector | Status | ADR |
+|---|---|---|---|---|
+| 0 | Schema | Finding v2 (cross-source) | ✅ `64990a2` | [0001](docs/adr/0001-modelo-b-nup-sentinel.md) / [0002](docs/adr/0002-finding-schema-v2.md) |
+| 1 | H⁺ Permission drift | `PermissionDriftService` | ✅ PR #3 | — |
+| 2 | N Triple-orphan | `Correlator` + `TripleOrphanDetector` | ✅ PR #6 | — |
+| 3 | O Flag × AST | `FlagDeadBranchDetectorService` | ✅ PR #7 | [0004](docs/adr/0004-flag-dead-branch-detector.md) |
+| 4 | P Adversarial | `AdversarialConfirmerService` + `HttpProbe` | ✅ PR #14 | [0005](docs/adr/0005-adversarial-confirmer.md) |
+| 5 | Q Field death | `FieldDeathDetectorService` | ✅ PR #15 | [0006](docs/adr/0006-field-death-detector.md) |
+| 6 | (Federation amplifier) | `nup-sentinel-semantic` (embeddings + dedup) | ⏳ pending | — |
+| Glue | Emitters in Code/Manifest/Probe → `/api/findings/ingest` | per-module HTTP clients | ⏳ in flight | — |
+
+Detectors live; the modules now need to ship the findings. The current sub-objective is wiring those emitters.
+
 ## What this repo is
 
 The Sentinel SaaS / SDK / MCP server. Originally a QA capture + diagnosis pipeline; now also the central correlator that ingests findings from the 5 modules, deduplicates by `symbolRef`, computes confidence as more sources confirm, and emits actionable remediations.
