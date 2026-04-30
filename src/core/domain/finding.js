@@ -118,6 +118,13 @@ export class Finding {
 
     this.createdAt = props.createdAt || new Date();
     this.updatedAt = props.updatedAt || new Date();
+
+    // If evidences were provided but confidence wasn't, derive it from the
+    // distinct-source count. Detectors that pre-set `confidence` keep their
+    // value untouched (e.g. TripleOrphanDetector hard-codes triple_confirmed).
+    if (this.confidence === null && this.evidences.length > 0) {
+      this.recomputeConfidence();
+    }
   }
 
   /**

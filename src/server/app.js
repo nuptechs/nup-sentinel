@@ -266,6 +266,7 @@ export function createApp(services, adapters = null) {
       createDriftRoutes({
         permissionDriftService: services.permissionDrift,
         tripleOrphanDetector: services.tripleOrphan,
+        flagDeadBranchService: services.flagDeadBranch,
         identifyClient: adapters.identifyClient,
       }),
     );

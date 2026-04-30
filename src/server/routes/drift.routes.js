@@ -15,7 +15,12 @@ import { asyncHandler } from '../middleware/error-handler.js';
 import { ValidationError } from '../../core/errors.js';
 import { requirePermission, requireProjectMembership } from '../middleware/oidc-auth.js';
 
-export function createDriftRoutes({ permissionDriftService, tripleOrphanDetector, identifyClient }) {
+export function createDriftRoutes({
+  permissionDriftService,
+  tripleOrphanDetector,
+  flagDeadBranchService,
+  identifyClient,
+}) {
   const router = Router();
 
   /**
@@ -63,6 +68,57 @@ export function createDriftRoutes({ permissionDriftService, tripleOrphanDetector
           sessionId,
           findingsCount: findings.length,
           findings: findings.map((f) => f.toJSON()),
+        },
+      });
+    }),
+  );
+
+  /**
+   * POST /api/projects/:projectId/flag-dead-branch/run
+   * Onda 3 / Vácuo 3 — cross-references the flag inventory against AST
+   * branches gated by feature flags. Emits findings of type
+   * `flag_dead_branch` with subtype `dead_flag` (severity=medium) or
+   * `orphan_flag` (severity=low).
+   *
+   * Body: { flagInventory: FlagRecord[], flagGuardedBranches: GuardedBranch[] }
+   */
+  router.post(
+    '/:projectId/flag-dead-branch/run',
+    requirePermission('sentinel.findings.write', { identifyClient }),
+    requireProjectMembership({ identifyClient, paramName: 'projectId' }),
+    asyncHandler(async (req, res) => {
+      if (!flagDeadBranchService) {
+        return res.status(503).json({
+          success: false,
+          error: 'flag_dead_branch_unavailable',
+          message: 'FlagDeadBranchDetectorService is not wired in this deployment.',
+        });
+      }
+
+      const { flagInventory, flagGuardedBranches } = req.body || {};
+      if (!Array.isArray(flagInventory)) {
+        throw new ValidationError('flagInventory (FlagRecord[]) is required in the request body');
+      }
+      if (!Array.isArray(flagGuardedBranches)) {
+        throw new ValidationError('flagGuardedBranches (GuardedBranch[]) is required in the request body');
+      }
+
+      const sessionId = randomUUID();
+      const result = await flagDeadBranchService.run({
+        organizationId: req.organizationId,
+        projectId: req.params.projectId,
+        sessionId,
+        flagInventory,
+        flagGuardedBranches,
+      });
+
+      res.status(200).json({
+        success: true,
+        data: {
+          sessionId,
+          stats: result.stats,
+          emittedCount: result.emitted.length,
+          emitted: result.emitted.map((f) => f.toJSON()),
         },
       });
     }),
