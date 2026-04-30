@@ -17,12 +17,20 @@ export class FindingService {
     this.storage = storage;
   }
 
-  async create({
-    sessionId, projectId, source, type, severity,
-    title, description, pageUrl, cssSelector,
-    screenshotUrl, annotation, browserContext,
-    correlationId, debugProbeSessionId, manifestProjectId, manifestRunId,
-  }) {
+  async create(props = {}) {
+    const {
+      sessionId, projectId, source, type, severity,
+      title, description, pageUrl, cssSelector,
+      screenshotUrl, annotation, browserContext, backendContext, codeContext,
+      media, diagnosis, correction,
+      correlationId, debugProbeSessionId, manifestProjectId, manifestRunId,
+      // Finding v2 (additive — required by detectors and the cross-source correlator).
+      schemaVersion, subtype, confidence, evidences, symbolRef,
+      // Tenant scope tag — attached post-construction so the storage adapter
+      // persists it onto sentinel_findings.organization_id.
+      organizationId,
+    } = props;
+
     if (!sessionId) throw new ValidationError('sessionId is required');
     if (!projectId) throw new ValidationError('projectId is required');
     if (!title?.trim()) throw new ValidationError('title is required');
@@ -46,12 +54,15 @@ export class FindingService {
     const finding = new Finding({
       sessionId, projectId, source, type, severity,
       title, description, pageUrl, cssSelector,
-      screenshotUrl, annotation, browserContext,
+      screenshotUrl, annotation, browserContext, backendContext, codeContext,
+      media, diagnosis, correction,
       correlationId: correlationId || null,
       debugProbeSessionId: resolvedDebugProbeSessionId,
       manifestProjectId: manifestProjectId || null,
       manifestRunId: manifestRunId || null,
+      schemaVersion, subtype, confidence, evidences, symbolRef,
     });
+    if (organizationId) finding.organizationId = organizationId;
 
     await this.storage.createFinding(finding);
     findingsCreatedTotal.inc({ source: String(source), type: String(type) });
