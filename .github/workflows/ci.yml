@@ -51,7 +51,11 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     env:
-      DATABASE_URL: postgresql://sentinel:sentinel_test_secret@localhost:5432/sentinel_test
+      # New helper-based integration tests.
+      DATABASE_URL_TEST: postgresql://sentinel:sentinel_test_secret@localhost:5432/sentinel_test
+      # Legacy postgres.adapter.test.js drops/recreates schema — use a
+      # separate DB so it doesn't race with helper-based tests.
+      SENTINEL_TEST_DATABASE_URL: postgresql://sentinel:sentinel_test_secret@localhost:5432/sentinel_legacy_test
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
@@ -60,4 +64,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      # Provision the second DB used by the legacy adapter test.
+      - name: Create legacy test DB
+        env:
+          PGPASSWORD: sentinel_test_secret
+        run: |
+          psql -h localhost -p 5432 -U sentinel -d sentinel_test \
+            -c "CREATE DATABASE sentinel_legacy_test"
       - run: npm test
