@@ -282,6 +282,7 @@ export function createApp(services, adapters = null) {
         tripleOrphanDetector: services.tripleOrphan,
         flagDeadBranchService: services.flagDeadBranch,
         adversarialConfirmer: services.adversarialConfirmer,
+        fieldDeathService: services.fieldDeath,
         identifyClient: adapters.identifyClient,
       }),
     );

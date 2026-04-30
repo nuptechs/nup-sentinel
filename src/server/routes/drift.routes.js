@@ -20,6 +20,7 @@ export function createDriftRoutes({
   tripleOrphanDetector,
   flagDeadBranchService,
   adversarialConfirmer,
+  fieldDeathService,
   identifyClient,
 }) {
   const router = Router();
@@ -203,6 +204,58 @@ export function createDriftRoutes({
           disconfirmedCount: result.disconfirmed.length,
           confirmed: result.confirmed.map((f) => f.toJSON()),
           disconfirmed: result.disconfirmed.map((f) => f.toJSON()),
+        },
+      });
+    }),
+  );
+
+  /**
+   * POST /api/projects/:projectId/field-death/run
+   * Onda 5 / Vácuo 5 — cross-references the schema field catalog (DB columns,
+   * GraphQL types, DTO properties) against runtime payload observations.
+   * Emits findings of type `field_death` with subtype `dead_field`
+   * (severity=medium for never-observed, severity=low for observed-with-zero-count).
+   *
+   * Body: { schemaFields: SchemaField[], observedFields: ObservedField[], config?: FieldDeathConfig }
+   */
+  router.post(
+    '/:projectId/field-death/run',
+    requirePermission('sentinel.findings.write', { identifyClient }),
+    requireProjectMembership({ identifyClient, paramName: 'projectId' }),
+    asyncHandler(async (req, res) => {
+      if (!fieldDeathService) {
+        return res.status(503).json({
+          success: false,
+          error: 'field_death_unavailable',
+          message: 'FieldDeathDetectorService is not wired in this deployment.',
+        });
+      }
+
+      const { schemaFields, observedFields, config } = req.body || {};
+      if (!Array.isArray(schemaFields)) {
+        throw new ValidationError('schemaFields (SchemaField[]) is required in the request body');
+      }
+      if (!Array.isArray(observedFields)) {
+        throw new ValidationError('observedFields (ObservedField[]) is required in the request body');
+      }
+
+      const sessionId = randomUUID();
+      const result = await fieldDeathService.run({
+        organizationId: req.organizationId,
+        projectId: req.params.projectId,
+        sessionId,
+        schemaFields,
+        observedFields,
+        config: config || {},
+      });
+
+      res.status(200).json({
+        success: true,
+        data: {
+          sessionId,
+          stats: result.stats,
+          emittedCount: result.emitted.length,
+          emitted: result.emitted.map((f) => f.toJSON()),
         },
       });
     }),
