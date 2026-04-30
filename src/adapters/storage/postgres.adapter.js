@@ -147,8 +147,9 @@ export class PostgresStorageAdapter extends StoragePort {
         annotation, browser_context, backend_context, code_context,
         diagnosis, correction, created_at, updated_at,
         correlation_id, debug_probe_session_id, manifest_project_id, manifest_run_id,
-        schema_version, subtype, confidence, evidences, symbol_ref)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
+        schema_version, subtype, confidence, evidences, symbol_ref,
+        organization_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)`,
       [
         finding.id, finding.sessionId, finding.projectId,
         finding.source, finding.type, finding.severity, finding.status,
@@ -167,6 +168,7 @@ export class PostgresStorageAdapter extends StoragePort {
         finding.confidence || null,
         this._json(finding.evidences ?? []),
         this._json(finding.symbolRef),
+        finding.organizationId || null,
       ]
     );
     return finding;
@@ -185,7 +187,8 @@ export class PostgresStorageAdapter extends StoragePort {
        SET status = $2, severity = $3, description = $4,
            browser_context = $5, backend_context = $6, code_context = $7,
            diagnosis = $8, correction = $9, updated_at = $10,
-           subtype = $11, confidence = $12, evidences = $13, symbol_ref = $14
+           subtype = $11, confidence = $12, evidences = $13, symbol_ref = $14,
+           organization_id = COALESCE($15, organization_id)
        WHERE id = $1`,
       [
         finding.id, finding.status, finding.severity, finding.description,
@@ -196,6 +199,7 @@ export class PostgresStorageAdapter extends StoragePort {
         finding.confidence || null,
         this._json(finding.evidences ?? []),
         this._json(finding.symbolRef),
+        finding.organizationId || null,
       ]
     );
     return finding;
@@ -514,7 +518,7 @@ export class PostgresStorageAdapter extends StoragePort {
   }
 
   _mapFinding(row) {
-    return new Finding({
+    const f = new Finding({
       id: row.id,
       sessionId: row.session_id,
       projectId: row.project_id,
@@ -547,6 +551,11 @@ export class PostgresStorageAdapter extends StoragePort {
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
     });
+    // organization_id is a tenant-scope tag, attached post-construction so
+    // the Finding domain class stays tenant-agnostic. Consumers reading
+    // findings see it on the JSON output and on the instance.
+    if (row.organization_id) f.organizationId = row.organization_id;
+    return f;
   }
 
   _mapTrace(row) {
