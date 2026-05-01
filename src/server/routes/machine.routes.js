@@ -33,8 +33,64 @@ const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 const DEFAULT_PROBE_PAGE_SIZE = 200;
 const DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-export function createMachineRoutes({ fieldDeathService, sessionService, findingService }) {
+export function createMachineRoutes({
+  fieldDeathService,
+  sessionService,
+  findingService,
+  embeddingAdapter,
+}) {
   const router = Router();
+
+  /**
+   * POST /api/m2m/semantic/embed
+   *
+   * Stateless embedding endpoint — given a list of texts, returns one
+   * vector per text. Useful as a smoke test and as a building block for
+   * external CI scripts that want to enqueue embeddings without the full
+   * dedup / index pipeline.
+   *
+   * Body: { texts: string[] }   max 1000 entries per call
+   *
+   * Onda 6 fase 1 — see ADR 0007.
+   */
+  router.post(
+    '/semantic/embed',
+    asyncHandler(async (req, res) => {
+      if (!embeddingAdapter || !embeddingAdapter.isConfigured?.()) {
+        return res.status(503).json({
+          success: false,
+          error: 'embedding_unavailable',
+          message: 'OPENAI_API_KEY is not set. See ADR 0007.',
+        });
+      }
+      const body = req.body || {};
+      if (!Array.isArray(body.texts) || body.texts.length === 0) {
+        throw new ValidationError('texts (string[]) is required');
+      }
+      if (body.texts.length > 1000) {
+        throw new ValidationError('texts: max 1000 entries per call');
+      }
+      for (const t of body.texts) {
+        if (typeof t !== 'string' || t.length === 0) {
+          throw new ValidationError('every entry of texts must be a non-empty string');
+        }
+      }
+
+      const result = await embeddingAdapter.embed(body.texts);
+      res.json({
+        success: true,
+        data: {
+          model: result.model,
+          dim: result.dim,
+          count: result.vectors.length,
+          ...(typeof result.tokens === 'number' ? { tokens: result.tokens } : {}),
+          // Echo first vector dim only by default to keep payloads small;
+          // full vectors only when explicitly requested.
+          vectors: body.includeVectors === true ? result.vectors : undefined,
+        },
+      });
+    }),
+  );
 
   /**
    * POST /api/m2m/field-death/run

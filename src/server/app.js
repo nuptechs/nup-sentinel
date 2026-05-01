@@ -270,6 +270,7 @@ export function createApp(services, adapters = null) {
         fieldDeathService: services.fieldDeath,
         sessionService: services.sessions,
         findingService: services.findings,
+        embeddingAdapter: adapters?.embedding ?? null,
       }),
     );
   }
