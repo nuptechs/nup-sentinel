@@ -17,11 +17,10 @@
 // ─────────────────────────────────────────────
 
 import { Router } from 'express';
-import { randomUUID } from 'node:crypto';
 import { asyncHandler } from '../middleware/error-handler.js';
 import { ValidationError } from '../../core/errors.js';
 
-export function createMachineRoutes({ fieldDeathService }) {
+export function createMachineRoutes({ fieldDeathService, sessionService }) {
   const router = Router();
 
   /**
@@ -84,7 +83,29 @@ export function createMachineRoutes({ fieldDeathService }) {
         resolvedOrgId = organizationId.trim();
       }
 
-      const sessionId = randomUUID();
+      // Create a real session row first so the FK on sentinel_findings.session_id
+      // resolves. The detector emits findings under this sessionId; the
+      // session metadata records the M2M provenance for later auditing.
+      if (!sessionService) {
+        return res.status(503).json({
+          success: false,
+          error: 'session_service_unavailable',
+          message: 'SessionService is not wired in this deployment.',
+        });
+      }
+      const session = await sessionService.create({
+        projectId: projectId.trim(),
+        userId: 'm2m:field-death',
+        metadata: {
+          source: 'auto_manifest',
+          emitter: 'm2m/field-death',
+          organizationId: resolvedOrgId,
+          schemaFieldCount: schemaFields.length,
+          observedFieldCount: observedFields.length,
+        },
+      });
+      const sessionId = session.id;
+
       const result = await fieldDeathService.run({
         organizationId: resolvedOrgId,
         projectId: projectId.trim(),
