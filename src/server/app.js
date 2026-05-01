@@ -264,7 +264,13 @@ export function createApp(services, adapters = null) {
   // Tenant scope is enforced from the apikey binding (req.apiKeyOrganizationId)
   // when present; otherwise the body must carry organizationId. ADR 0003 §5.
   if (services?.fieldDeath) {
-    app.use('/api/m2m', createMachineRoutes({ fieldDeathService: services.fieldDeath }));
+    app.use(
+      '/api/m2m',
+      createMachineRoutes({
+        fieldDeathService: services.fieldDeath,
+        sessionService: services.sessions,
+      }),
+    );
   }
 
   // Tenant-scoped routes — require OIDC bearer token resolved against
