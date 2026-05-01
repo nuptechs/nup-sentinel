@@ -15,6 +15,12 @@
 //   POST /api/m2m/field-death/run-from-sources  — Onda 5 cron-style: pulls
 //     schemaFields from Manifest + observedFields from Probe sessions, runs
 //     detector. One curl per project per day is enough.
+//   POST /api/m2m/cold-routes/run-from-sources  — Onda 2 / Vácuo 2 prep:
+//     pulls declared routes from Manifest + runtime hit counts from Probe
+//     sessions. For each declared route with zero hits in the window, emits
+//     a `dead_code/cold_route` finding with `source=auto_probe_runtime`. When
+//     other emitters (knip, manifest) flag the same symbolRef, the
+//     TripleOrphanDetector promotes automatically.
 //
 // Refs: ADR 0003 §5 (apikey contract for M2M emitters), ADR 0006.
 // ─────────────────────────────────────────────
@@ -27,7 +33,7 @@ const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 const DEFAULT_PROBE_PAGE_SIZE = 200;
 const DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-export function createMachineRoutes({ fieldDeathService, sessionService }) {
+export function createMachineRoutes({ fieldDeathService, sessionService, findingService }) {
   const router = Router();
 
   /**
@@ -357,7 +363,283 @@ export function createMachineRoutes({ fieldDeathService, sessionService }) {
     }),
   );
 
+  /**
+   * POST /api/m2m/cold-routes/run-from-sources
+   *
+   * Onda 2 / Vácuo 2 prep step. Pulls declared routes from Manifest's
+   * catalog-entries export and runtime hit counts from Probe sessions
+   * tagged for the project. For each declared route with zero hits in the
+   * window, emits a `dead_code/cold_route` finding with
+   * `source=auto_probe_runtime` and `symbolRef={kind:'route', identifier:'METHOD path'}`.
+   *
+   * The TripleOrphanDetector then promotes findings whose symbolRef has
+   * evidences from all 3 required sources (auto_static + auto_manifest +
+   * auto_probe_runtime). Today we ship only the runtime side; when knip
+   * (auto_static) and the manifest emitter both flag the same route, the
+   * promotion is automatic.
+   *
+   * Body:
+   *   {
+   *     projectId:           string,
+   *     manifestProjectId:   string|number,
+   *     probeSessionTag?:    string,
+   *     windowMs?:           number,
+   *     organizationId?:     string,
+   *     dryRun?:             boolean,
+   *     manifestUrl?:        string,
+   *     probeUrl?:           string,
+   *   }
+   */
+  router.post(
+    '/cold-routes/run-from-sources',
+    asyncHandler(async (req, res) => {
+      if (!sessionService || !findingService) {
+        return res.status(503).json({
+          success: false,
+          error: 'service_unavailable',
+          message: 'session and finding services must be wired',
+        });
+      }
+
+      const body = req.body || {};
+      const projectId = typeof body.projectId === 'string' ? body.projectId.trim() : '';
+      if (!projectId) throw new ValidationError('projectId (string) is required');
+
+      const manifestProjectId =
+        body.manifestProjectId !== undefined && body.manifestProjectId !== null
+          ? String(body.manifestProjectId).trim()
+          : '';
+      if (!manifestProjectId) {
+        throw new ValidationError('manifestProjectId is required');
+      }
+
+      const manifestUrl = (body.manifestUrl || process.env.MANIFEST_URL || '').replace(/\/+$/, '');
+      const probeUrl = (
+        body.probeUrl ||
+        process.env.SENTINEL_TRACE_URL ||
+        process.env.DEBUG_PROBE_URL ||
+        ''
+      ).replace(/\/+$/, '');
+      const probeApiKey = process.env.SENTINEL_TRACE_API_KEY || process.env.PROBE_API_KEY || '';
+
+      if (!manifestUrl || !probeUrl) {
+        return res.status(503).json({ success: false, error: 'sources_not_configured' });
+      }
+
+      const probeSessionTag =
+        typeof body.probeSessionTag === 'string' && body.probeSessionTag.trim()
+          ? body.probeSessionTag.trim()
+          : `sentinel:project:${projectId}`;
+      const windowMs =
+        typeof body.windowMs === 'number' && body.windowMs > 0
+          ? body.windowMs
+          : DEFAULT_WINDOW_MS;
+      const dryRun = body.dryRun === true;
+
+      // Tenant scope (same rules as field-death).
+      const boundOrgId = req.apiKeyOrganizationId;
+      let resolvedOrgId;
+      if (boundOrgId) {
+        if (body.organizationId && body.organizationId !== boundOrgId) {
+          return res.status(403).json({
+            success: false,
+            error: 'tenant_scope_violation',
+            message: `body.organizationId="${body.organizationId}" does not match the API key's bound org="${boundOrgId}"`,
+          });
+        }
+        resolvedOrgId = boundOrgId;
+      } else {
+        if (typeof body.organizationId !== 'string' || !body.organizationId.trim()) {
+          throw new ValidationError(
+            'organizationId is required when the API key is tenant-agnostic',
+          );
+        }
+        resolvedOrgId = body.organizationId.trim();
+      }
+
+      // Step 1: declared routes from Manifest catalog-entries export.
+      let declaredRoutes;
+      try {
+        const url = `${manifestUrl}/api/catalog-entries/${encodeURIComponent(manifestProjectId)}/export`;
+        const data = await fetchJsonOrThrow(url);
+        declaredRoutes = canonicalizeDeclaredRoutes(data?.catalog || []);
+      } catch (err) {
+        return res.status(502).json({
+          success: false,
+          error: 'manifest_fetch_failed',
+          message: err?.message || String(err),
+        });
+      }
+
+      // Step 2: aggregate runtime hits across matching Probe sessions.
+      const cutoff = Date.now() - windowMs;
+      const matchingSessions = await listProbeSessionsByTag({
+        probeUrl,
+        apiKey: probeApiKey,
+        tag: probeSessionTag,
+        cutoff,
+      });
+      const hitCounts = new Map(); // key: "METHOD path" → count
+      const sessionStats = {
+        sessionsScanned: matchingSessions.length,
+        sessionsWithHits: 0,
+        sessionFetchErrors: 0,
+      };
+      for (const s of matchingSessions) {
+        try {
+          const url = `${probeUrl}/api/sessions/${encodeURIComponent(s.id)}/runtime-hits`;
+          const data = await fetchJsonOrThrow(url, {
+            headers: probeApiKey ? { 'x-api-key': probeApiKey } : {},
+          });
+          const items = Array.isArray(data?.hits) ? data.hits : [];
+          if (items.length > 0) sessionStats.sessionsWithHits++;
+          for (const h of items) {
+            if (typeof h?.method !== 'string' || typeof h?.path !== 'string') continue;
+            const key = `${h.method.toUpperCase()} ${h.path}`;
+            hitCounts.set(key, (hitCounts.get(key) || 0) + (h.occurrenceCount || 0));
+          }
+        } catch (err) {
+          sessionStats.sessionFetchErrors++;
+          console.warn(`[m2m/cold-routes] session ${s.id} fetch failed: ${err?.message || err}`);
+        }
+      }
+
+      // Step 3: cross-reference declared routes with runtime hits.
+      const coldRoutes = [];
+      const hotRoutes = [];
+      for (const r of declaredRoutes) {
+        const key = `${r.method} ${r.path}`;
+        if ((hitCounts.get(key) || 0) === 0) coldRoutes.push(r);
+        else hotRoutes.push(r);
+      }
+
+      const sources = {
+        manifest: {
+          projectId: manifestProjectId,
+          declaredRouteCount: declaredRoutes.length,
+        },
+        probe: {
+          tag: probeSessionTag,
+          windowMs,
+          ...sessionStats,
+          uniqueRoutesWithHits: hitCounts.size,
+        },
+        cross: {
+          coldRouteCount: coldRoutes.length,
+          hotRouteCount: hotRoutes.length,
+        },
+      };
+
+      if (dryRun) {
+        return res.json({
+          success: true,
+          data: { dryRun: true, sources, coldRoutes: coldRoutes.slice(0, 50) },
+        });
+      }
+
+      // Step 4: emit cold_route findings.
+      const session = await sessionService.create({
+        projectId,
+        userId: 'm2m:cold-routes-from-sources',
+        metadata: {
+          source: 'auto_probe_runtime',
+          emitter: 'm2m/cold-routes/from-sources',
+          organizationId: resolvedOrgId,
+          manifestProjectId,
+          probeSessionTag,
+          windowMs,
+          declaredRouteCount: declaredRoutes.length,
+          coldRouteCount: coldRoutes.length,
+        },
+      });
+
+      const observedAt = new Date().toISOString();
+      const emitted = [];
+      for (const r of coldRoutes) {
+        const f = await findingService.create({
+          sessionId: session.id,
+          projectId,
+          source: 'auto_probe_runtime',
+          type: 'dead_code',
+          subtype: 'cold_route',
+          severity: 'medium',
+          title: `Cold route: "${r.method} ${r.path}" never hit in the window`,
+          description:
+            `Route "${r.method} ${r.path}" is declared by ${r.controller || 'a controller'} but received zero hits across ${sessionStats.sessionsScanned} probe sessions in the last ${Math.round(windowMs / 86400000)} days. Probable orphan — confirm via UI/role audit before removal.`,
+          schemaVersion: '2.0.0',
+          confidence: 'single_source',
+          evidences: [
+            {
+              source: 'auto_probe_runtime',
+              sourceRunId: `cold-routes-${Date.now()}`,
+              observation: `0 hits across ${sessionStats.sessionsScanned} sessions tagged ${probeSessionTag}`,
+              observedAt,
+            },
+          ],
+          symbolRef: { kind: 'route', identifier: `${r.method} ${r.path}` },
+          organizationId: resolvedOrgId,
+        });
+        emitted.push(f);
+      }
+
+      res.json({
+        success: true,
+        data: {
+          sessionId: session.id,
+          sources,
+          emittedCount: emitted.length,
+          emitted: emitted.slice(0, 25).map((f) => f.toJSON()),
+        },
+      });
+    }),
+  );
+
   return router;
+}
+
+function canonicalizeDeclaredRoutes(catalog) {
+  // Collapses numeric/UUID segments to `:id` so it matches the Probe
+  // canonicalization. Without this, /api/users/{id} from the Manifest
+  // catalog wouldn't match /api/users/:id from Probe runtime hits.
+  const NUMERIC_SEGMENT = /^\d+$/;
+  const UUID_SEGMENT =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const HEX_LONG = /^[0-9a-f]{16,}$/i;
+  const SPRING_PARAM = /^\{[^}]+\}$/;
+
+  function canon(rawPath) {
+    if (typeof rawPath !== 'string' || rawPath.length === 0) return null;
+    // Manifest paths can come with /{id} (Spring) or /:id (Express) or
+    // literal numbers (when documented in OpenAPI from real samples).
+    const parts = rawPath.split('/').filter(Boolean);
+    for (let i = 0; i < parts.length; i++) {
+      const seg = parts[i];
+      if (!seg) continue;
+      if (
+        NUMERIC_SEGMENT.test(seg) ||
+        UUID_SEGMENT.test(seg) ||
+        HEX_LONG.test(seg) ||
+        SPRING_PARAM.test(seg)
+      ) {
+        parts[i] = ':id';
+      }
+    }
+    return '/' + parts.join('/');
+  }
+
+  const seen = new Set();
+  const out = [];
+  for (const e of catalog) {
+    if (!e || typeof e !== 'object') continue;
+    const method = String(e.httpMethod || '').toUpperCase();
+    const path = canon(e.endpoint);
+    if (!method || !path) continue;
+    const key = `${method} ${path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ method, path, controller: e.controllerClass || null, controllerMethod: e.controllerMethod || null });
+  }
+  return out;
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────

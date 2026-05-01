@@ -269,6 +269,7 @@ export function createApp(services, adapters = null) {
       createMachineRoutes({
         fieldDeathService: services.fieldDeath,
         sessionService: services.sessions,
+        findingService: services.findings,
       }),
     );
   }
