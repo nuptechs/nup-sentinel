@@ -20,6 +20,7 @@ import { createFindingRoutes } from './routes/findings.js';
 import { createProjectRoutes } from './routes/projects.js';
 import { createProjectCrudRoutes } from './routes/project-crud.routes.js';
 import { createDriftRoutes } from './routes/drift.routes.js';
+import { createMachineRoutes } from './routes/machine.routes.js';
 import { createWebhookEventRoutes } from './routes/webhook-events.js';
 import { createProbeWebhookRoutes } from './routes/probe-webhooks.js';
 import { createIdentifyWebhookRoutes } from './routes/identify-webhooks.routes.js';
@@ -258,6 +259,13 @@ export function createApp(services, adapters = null) {
   app.use('/api/sessions', createSessionRoutes(services));
   app.use('/api/findings', createFindingRoutes(services));
   app.use('/api/projects', createProjectRoutes(services));
+
+  // M2M endpoints for emitters (knip, manifest, probe). Apikey-only — no OIDC.
+  // Tenant scope is enforced from the apikey binding (req.apiKeyOrganizationId)
+  // when present; otherwise the body must carry organizationId. ADR 0003 §5.
+  if (services?.fieldDeath) {
+    app.use('/api/m2m', createMachineRoutes({ fieldDeathService: services.fieldDeath }));
+  }
 
   // Tenant-scoped routes — require OIDC bearer token resolved against
   // NuPIdentify (ADR 0003). The middleware decorates req.user/orgId/token
