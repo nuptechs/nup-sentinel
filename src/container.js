@@ -6,6 +6,8 @@
 
 import { PostgresStorageAdapter } from './adapters/storage/postgres.adapter.js';
 import { MemoryStorageAdapter } from './adapters/storage/memory.adapter.js';
+import { PostgresProjectStorageAdapter } from './adapters/storage/postgres-project.adapter.js';
+import { MemoryProjectStorageAdapter } from './adapters/storage/memory-project.adapter.js';
 import { ManifestAnalyzerAdapter } from './adapters/analyzer/manifest.adapter.js';
 import { NoopAnalyzerAdapter } from './adapters/analyzer/noop.adapter.js';
 import { ClaudeAIAdapter } from './adapters/ai/claude.adapter.js';
@@ -18,12 +20,19 @@ import { LinearIssueAdapter } from './adapters/issue-tracker/linear.adapter.js';
 import { JiraIssueAdapter } from './adapters/issue-tracker/jira.adapter.js';
 import { NoopIssueTrackerAdapter } from './adapters/issue-tracker/noop.adapter.js';
 import { NoopCaptureAdapter } from './adapters/capture/noop.adapter.js';
+import { IdentifyClient } from './integrations/identify/identify.client.js';
 
 import { SessionService } from './core/services/session.service.js';
 import { FindingService } from './core/services/finding.service.js';
 import { DiagnosisService } from './core/services/diagnosis.service.js';
 import { CorrectionService } from './core/services/correction.service.js';
 import { IntegrationService } from './core/services/integration.service.js';
+import { CorrelatorService } from './core/services/correlator.service.js';
+import { PermissionDriftService } from './core/services/permission-drift.service.js';
+import { TripleOrphanDetectorService } from './core/services/triple-orphan-detector.service.js';
+import { FlagDeadBranchDetectorService } from './core/services/flag-dead-branch-detector.service.js';
+import { AdversarialConfirmerService } from './core/services/adversarial-confirmer.service.js';
+import { FieldDeathDetectorService } from './core/services/field-death-detector.service.js';
 
 let _container = null;
 
@@ -84,9 +93,14 @@ export async function shutdownContainer() {
 // ── Builder functions ─────────────────────────
 
 async function buildAdapters() {
-  const storage = await buildStorage();
+  const { storage, pool } = await buildStorage();
   return {
     storage,
+    pool, // exposed so adapters that share the pool (project storage) can reuse
+    projectStorage: pool
+      ? new PostgresProjectStorageAdapter({ pool })
+      : new MemoryProjectStorageAdapter(),
+    identifyClient: buildIdentifyClient(),
     capture: new NoopCaptureAdapter(),
     trace: buildTrace(storage),
     analyzer: buildAnalyzer(),
@@ -97,7 +111,10 @@ async function buildAdapters() {
 }
 
 function buildServices(adapters) {
-  return {
+  // Correlator is a dep of FieldDeath + FlagDeadBranch + (future emitters
+  // that opt-in to symbolRef-based dedup). Construct it first.
+  const correlator = new CorrelatorService({ storage: adapters.storage });
+  const services = {
     sessions: new SessionService({ storage: adapters.storage, trace: adapters.trace }),
     findings: new FindingService({ storage: adapters.storage }),
     diagnosis: new DiagnosisService({
@@ -119,18 +136,57 @@ function buildServices(adapters) {
       issueTracker: adapters.issueTracker,
       notification: adapters.notification,
     }),
+    // Cross-source detectors (Ondas 1-5). Routes in
+    // `server/routes/drift.routes.js` and `server/routes/machine.routes.js`
+    // gate on the presence of these services — wire them all here so the
+    // routes actually mount instead of returning 503/404.
+    correlator,
+    tripleOrphan: new TripleOrphanDetectorService({ storage: adapters.storage }),
+    flagDeadBranch: new FlagDeadBranchDetectorService({
+      storage: adapters.storage,
+      correlator,
+    }),
+    adversarialConfirmer: new AdversarialConfirmerService({ storage: adapters.storage }),
+    fieldDeath: new FieldDeathDetectorService({
+      storage: adapters.storage,
+      correlator,
+    }),
+    // PermissionDrift requires identifyClient — only wire when configured.
+    ...(adapters.identifyClient
+      ? {
+          permissionDrift: new PermissionDriftService({
+            storage: adapters.storage,
+            identifyClient: adapters.identifyClient,
+          }),
+        }
+      : {}),
+    // ProjectStorage is a service-level surface for the OIDC-gated CRUD
+    // routes. Mounted only when both identifyClient and projectStorage exist.
+    projectStorage: adapters.projectStorage,
     // Exposed adapters for MCP tool handlers (Gap 9).
     // These are read-only references — business logic must still go
     // through the service layer.
     trace: adapters.trace,
     analyzer: adapters.analyzer,
   };
+  return services;
+}
+
+function buildIdentifyClient() {
+  const baseUrl = process.env.IDENTIFY_URL;
+  if (!baseUrl) return null;
+  console.log(`[Sentinel] Identify: ${baseUrl}`);
+  return new IdentifyClient({
+    baseUrl,
+    systemId: process.env.IDENTIFY_SYSTEM_ID || undefined,
+    systemApiKey: process.env.IDENTIFY_SYSTEM_API_KEY || undefined,
+  });
 }
 
 async function buildStorage() {
   if (process.env.SENTINEL_MEMORY_STORAGE === 'true') {
     console.log('[Sentinel] Storage: in-memory');
-    return new MemoryStorageAdapter();
+    return { storage: new MemoryStorageAdapter(), pool: null };
   }
 
   const url = process.env.DATABASE_URL;
@@ -151,7 +207,7 @@ async function buildStorage() {
         const client = await pool.connect();
         client.release();
         console.log('[Sentinel] Storage: PostgreSQL (connected)');
-        return new PostgresStorageAdapter({ pool });
+        return { storage: new PostgresStorageAdapter({ pool }), pool };
       } catch (err) {
         console.warn(`[Sentinel] Postgres connection attempt ${attempt}/${maxRetries} failed: ${err.message}`);
         if (attempt < maxRetries) {
@@ -163,11 +219,11 @@ async function buildStorage() {
     // All retries failed — fall back to in-memory
     console.error('[Sentinel] Postgres unavailable after retries — falling back to in-memory');
     await pool.end().catch(() => {});
-    return new MemoryStorageAdapter();
+    return { storage: new MemoryStorageAdapter(), pool: null };
   }
 
   console.log('[Sentinel] Storage: in-memory (no DATABASE_URL)');
-  return new MemoryStorageAdapter();
+  return { storage: new MemoryStorageAdapter(), pool: null };
 }
 
 function buildTrace(storage) {
