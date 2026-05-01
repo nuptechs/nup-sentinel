@@ -1,0 +1,9 @@
+{
+  "schemaFields": [
+    { "entity": "User", "fieldName": "createdAt", "kind": "column" }
+  ],
+  "observedFields": [
+    { "entity": "User", "fieldName": "createdAt", "occurrenceCount": 0 }
+  ],
+  "config": {}
+}

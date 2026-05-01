@@ -1,0 +1,6 @@
+{
+  "expectedFindings": [
+    { "symbolRef": "User.email", "subtype": "dead_field", "severity": "medium" }
+  ],
+  "stats": { "alive": 1, "dead": 1, "stale": 0 }
+}

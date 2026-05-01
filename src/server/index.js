@@ -6,10 +6,12 @@ import express from 'express';
 import { createApp } from './app.js';
 import { initializeContainer, shutdownContainer, getContainer } from '../container.js';
 import { RetentionJob } from '../core/retention.js';
+import { Scheduler } from './scheduler.js';
 
 const PORT = parseInt(process.env.PORT || '3900', 10);
 
 let retentionJob = null;
+let scheduler = null;
 let ready = false;
 
 async function main() {
@@ -45,6 +47,16 @@ async function main() {
     retentionJob.start();
   }
 
+  // Start the cross-source detector scheduler (Field Death + Cold Routes
+  // periodic runs). Skipped automatically when SENTINEL_CRON_DISABLED=true
+  // or when no pg.Pool is available (memory-mode).
+  scheduler = new Scheduler({
+    pool: adapters.pool ?? null,
+    fieldDeathOrchestrator: services.fieldDeathOrchestrator,
+    coldRoutesOrchestrator: services.coldRoutesOrchestrator,
+  });
+  scheduler.start();
+
   // Replace early server with full app
   await new Promise((resolve) => server.close(resolve));
   server = app.listen(PORT, () => {
@@ -57,6 +69,7 @@ async function main() {
   const shutdown = async (signal) => {
     console.log(`\n[Sentinel] ${signal} received — shutting down...`);
     if (retentionJob) retentionJob.stop();
+    if (scheduler) scheduler.stop();
     server.close(async () => {
       await shutdownContainer();
       process.exit(0);

@@ -1,0 +1,11 @@
+{
+  "schemaFields": [
+    { "entity": "User", "fieldName": "id", "kind": "column" },
+    { "entity": "User", "fieldName": "email", "kind": "column" }
+  ],
+  "observedFields": [
+    { "entity": "user", "fieldName": "ID", "occurrenceCount": 100 },
+    { "entity": "users", "fieldName": "email", "occurrenceCount": 100 }
+  ],
+  "config": { "caseInsensitiveEntity": true, "caseInsensitiveField": true }
+}

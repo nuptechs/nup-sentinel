@@ -1,0 +1,11 @@
+{
+  "schemaFields": [
+    { "entity": "User", "fieldName": "id", "kind": "column" },
+    { "entity": "User", "fieldName": "email", "kind": "column" }
+  ],
+  "observedFields": [
+    { "entity": "User", "fieldName": "id", "occurrenceCount": 100 },
+    { "entity": "User", "fieldName": "email", "occurrenceCount": 100 }
+  ],
+  "config": {}
+}
