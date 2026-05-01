@@ -20,6 +20,7 @@ import { LinearIssueAdapter } from './adapters/issue-tracker/linear.adapter.js';
 import { JiraIssueAdapter } from './adapters/issue-tracker/jira.adapter.js';
 import { NoopIssueTrackerAdapter } from './adapters/issue-tracker/noop.adapter.js';
 import { NoopCaptureAdapter } from './adapters/capture/noop.adapter.js';
+import { OpenAIEmbeddingAdapter } from './adapters/embedding/openai.adapter.js';
 import { IdentifyClient } from './integrations/identify/identify.client.js';
 
 import { SessionService } from './core/services/session.service.js';
@@ -107,7 +108,19 @@ async function buildAdapters() {
     ai: buildAI(),
     notification: buildNotification(storage),
     issueTracker: buildIssueTracker(),
+    embedding: buildEmbedding(),
   };
+}
+
+function buildEmbedding() {
+  if (!process.env.OPENAI_API_KEY) {
+    console.log('[Sentinel] Embedding: not configured (OPENAI_API_KEY missing)');
+    return null;
+  }
+  console.log(
+    `[Sentinel] Embedding: OpenAI (${process.env.SENTINEL_EMBEDDING_MODEL || 'text-embedding-3-large'})`,
+  );
+  return new OpenAIEmbeddingAdapter();
 }
 
 function buildServices(adapters) {
