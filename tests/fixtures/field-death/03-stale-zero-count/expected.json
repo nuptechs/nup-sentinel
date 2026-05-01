@@ -1,0 +1,6 @@
+{
+  "expectedFindings": [
+    { "symbolRef": "User.createdAt", "subtype": "dead_field", "severity": "low" }
+  ],
+  "stats": { "alive": 0, "dead": 0, "stale": 1 }
+}

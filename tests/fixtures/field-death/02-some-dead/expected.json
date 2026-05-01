@@ -1,0 +1,8 @@
+{
+  "expectedFindings": [
+    { "symbolRef": "User.fax", "subtype": "dead_field", "severity": "medium" },
+    { "symbolRef": "User.legacyToken", "subtype": "dead_field", "severity": "medium" },
+    { "symbolRef": "Order.status", "subtype": "dead_field", "severity": "medium" }
+  ],
+  "stats": { "alive": 4, "dead": 3, "stale": 0 }
+}

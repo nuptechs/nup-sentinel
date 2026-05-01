@@ -1,0 +1,6 @@
+{
+  "expectedFindings": [
+    { "symbolRef": "User.fax", "subtype": "dead_field", "severity": "medium" }
+  ],
+  "stats": { "alive": 0, "dead": 1, "stale": 0, "skippedAllowlisted": 2 }
+}

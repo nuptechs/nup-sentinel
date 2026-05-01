@@ -32,8 +32,11 @@ import { CorrelatorService } from './core/services/correlator.service.js';
 import { PermissionDriftService } from './core/services/permission-drift.service.js';
 import { TripleOrphanDetectorService } from './core/services/triple-orphan-detector.service.js';
 import { FlagDeadBranchDetectorService } from './core/services/flag-dead-branch-detector.service.js';
-import { AdversarialConfirmerService } from './core/services/adversarial-confirmer.service.js';
+import { AdversarialConfirmerService, createHttpProbe } from './core/services/adversarial-confirmer.service.js';
 import { FieldDeathDetectorService } from './core/services/field-death-detector.service.js';
+import { SourceFetcher } from './core/services/orchestrators/source-fetcher.service.js';
+import { FieldDeathOrchestrator } from './core/services/orchestrators/field-death.orchestrator.js';
+import { ColdRoutesOrchestrator } from './core/services/orchestrators/cold-routes.orchestrator.js';
 
 let _container = null;
 
@@ -159,7 +162,7 @@ function buildServices(adapters) {
       storage: adapters.storage,
       correlator,
     }),
-    adversarialConfirmer: new AdversarialConfirmerService({ storage: adapters.storage }),
+    adversarialConfirmer: buildAdversarialConfirmer(adapters),
     fieldDeath: new FieldDeathDetectorService({
       storage: adapters.storage,
       correlator,
@@ -182,7 +185,42 @@ function buildServices(adapters) {
     trace: adapters.trace,
     analyzer: adapters.analyzer,
   };
+
+  // Cross-source orchestrators — wired AFTER all the underlying services
+  // are present so the constructors can fail fast on missing deps.
+  const sourceFetcher = new SourceFetcher({
+    manifestUrl: process.env.MANIFEST_URL,
+    probeUrl: process.env.SENTINEL_TRACE_URL || process.env.DEBUG_PROBE_URL,
+    probeApiKey: process.env.SENTINEL_TRACE_API_KEY || process.env.PROBE_API_KEY,
+  });
+  services.sourceFetcher = sourceFetcher;
+  services.fieldDeathOrchestrator = new FieldDeathOrchestrator({
+    fieldDeathService: services.fieldDeath,
+    sessionService: services.sessions,
+    sourceFetcher,
+  });
+  services.coldRoutesOrchestrator = new ColdRoutesOrchestrator({
+    findingService: services.findings,
+    sessionService: services.sessions,
+    sourceFetcher,
+  });
+
   return services;
+}
+
+/**
+ * Build the AdversarialConfirmerService AND register the out-of-the-box
+ * `unprotected_handler` HttpProbe. Without this registration the service
+ * accepts findings but skips them all with `no_probe_for_subtype`.
+ */
+function buildAdversarialConfirmer(adapters) {
+  const svc = new AdversarialConfirmerService({ storage: adapters.storage });
+  // Default probe — Onda 4 / Vácuo 4 / ADR 0005. Hits the route without
+  // an Authorization header; 2xx confirms the static finding (route is
+  // genuinely unprotected at runtime).
+  svc.registerProbe('unprotected_handler', createHttpProbe());
+  console.log('[Sentinel] AdversarialConfirmer: HttpProbe registered for `unprotected_handler`');
+  return svc;
 }
 
 function buildIdentifyClient() {

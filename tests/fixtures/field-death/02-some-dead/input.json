@@ -1,0 +1,18 @@
+{
+  "schemaFields": [
+    { "entity": "User", "fieldName": "id", "kind": "column" },
+    { "entity": "User", "fieldName": "email", "kind": "column" },
+    { "entity": "User", "fieldName": "fax", "kind": "column" },
+    { "entity": "User", "fieldName": "legacyToken", "kind": "column" },
+    { "entity": "Order", "fieldName": "id", "kind": "column" },
+    { "entity": "Order", "fieldName": "total", "kind": "column" },
+    { "entity": "Order", "fieldName": "status", "kind": "column" }
+  ],
+  "observedFields": [
+    { "entity": "User", "fieldName": "id", "occurrenceCount": 12345 },
+    { "entity": "User", "fieldName": "email", "occurrenceCount": 8910 },
+    { "entity": "Order", "fieldName": "id", "occurrenceCount": 100 },
+    { "entity": "Order", "fieldName": "total", "occurrenceCount": 100 }
+  ],
+  "config": { "caseInsensitiveEntity": true }
+}

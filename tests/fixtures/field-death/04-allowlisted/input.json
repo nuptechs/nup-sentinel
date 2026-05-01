@@ -1,0 +1,12 @@
+{
+  "schemaFields": [
+    { "entity": "AuditLog", "fieldName": "actionType", "kind": "column" },
+    { "entity": "AuditLog", "fieldName": "userId", "kind": "column" },
+    { "entity": "User", "fieldName": "fax", "kind": "column" }
+  ],
+  "observedFields": [],
+  "config": {
+    "allowlistedEntities": ["AuditLog"],
+    "caseInsensitiveEntity": true
+  }
+}

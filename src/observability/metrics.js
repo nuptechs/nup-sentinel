@@ -92,6 +92,29 @@ export const autoProcessTotal = new Counter({
   registers: [registry],
 });
 
+// ── Cross-source orchestrators (cron-callable detector pipelines) ──
+export const fieldDeathOrchestratorRunsTotal = new Counter({
+  name: 'sentinel_field_death_orchestrator_runs_total',
+  help: 'FieldDeathOrchestrator.runFromSources outcomes',
+  labelNames: ['outcome'], // outcome: emitted|no_findings|dry_run|manifest_fetch_failed|probe_sessions_failed
+  registers: [registry],
+});
+
+export const coldRoutesOrchestratorRunsTotal = new Counter({
+  name: 'sentinel_cold_routes_orchestrator_runs_total',
+  help: 'ColdRoutesOrchestrator.runFromSources outcomes',
+  labelNames: ['outcome'],
+  registers: [registry],
+});
+
+// ── Cron scheduler ──
+export const cronJobRunsTotal = new Counter({
+  name: 'sentinel_cron_job_runs_total',
+  help: 'Internal cron-job runs',
+  labelNames: ['job', 'outcome'], // outcome: success|failed|skipped_locked|skipped_disabled
+  registers: [registry],
+});
+
 /**
  * Reset all metrics. Used by tests to keep runs isolated.
  */

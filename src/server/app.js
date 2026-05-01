@@ -271,6 +271,8 @@ export function createApp(services, adapters = null) {
         sessionService: services.sessions,
         findingService: services.findings,
         embeddingAdapter: adapters?.embedding ?? null,
+        fieldDeathOrchestrator: services.fieldDeathOrchestrator ?? null,
+        coldRoutesOrchestrator: services.coldRoutesOrchestrator ?? null,
       }),
     );
   }
