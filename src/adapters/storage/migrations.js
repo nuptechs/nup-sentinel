@@ -233,6 +233,67 @@ const MIGRATIONS = [
         ON sentinel_sessions (organization_id, created_at DESC) WHERE organization_id IS NOT NULL;
     `,
   },
+
+  // ── v8 ── SCIP-aligned cross-repo symbol index. MATRIZ-COMPETITIVA
+  // eixo C ("Cross-repo symbol graph") closes here. Schema is shaped
+  // after Sourcegraph's SCIP protocol so future adapters (scip-typescript,
+  // scip-java, scip-python, custom indexers) translate inputs once and
+  // share the same store.
+  //
+  // Idempotency: the unique index on
+  //   (organization_id, repo, ref, relative_path, symbol_id, start_line, start_col)
+  // means re-running an indexer against the same ref does not duplicate
+  // (ON CONFLICT DO UPDATE in the adapter).
+  //
+  // Cross-repo lookup ("where else is this symbol referenced?") rides
+  // the (organization_id, symbol_id) index — single index scan per call.
+  {
+    version: 7,
+    name: 'cross_repo_symbol_index',
+    sql: `
+      CREATE TABLE IF NOT EXISTS sentinel_symbols (
+        id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        organization_id   TEXT NOT NULL,
+        project_id        UUID REFERENCES sentinel_projects(id) ON DELETE CASCADE,
+        repo              TEXT NOT NULL,
+        ref               TEXT NOT NULL,
+        relative_path     TEXT NOT NULL,
+        symbol_id         TEXT NOT NULL,
+        display_name      TEXT,
+        kind              TEXT,
+        language          TEXT,
+        start_line        INTEGER NOT NULL,
+        start_col         INTEGER NOT NULL,
+        end_line          INTEGER NOT NULL,
+        end_col           INTEGER NOT NULL,
+        is_definition     BOOLEAN NOT NULL DEFAULT false,
+        documentation     JSONB,
+        enclosing_symbol  TEXT,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      -- Idempotency key: same indexer run on same (repo, ref) is a no-op
+      -- on overlap. Drives the ON CONFLICT path in PostgresSymbolIndex.
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_sentinel_symbols_unique
+        ON sentinel_symbols (
+          organization_id, repo, ref, relative_path,
+          symbol_id, start_line, start_col
+        );
+
+      -- Cross-repo lookup ("Find references to <symbol>" tenant-wide).
+      CREATE INDEX IF NOT EXISTS idx_sentinel_symbols_org_symbol
+        ON sentinel_symbols (organization_id, symbol_id);
+
+      -- Per-ref scan (re-index drop / show-all-symbols-of-current-ref).
+      CREATE INDEX IF NOT EXISTS idx_sentinel_symbols_ref
+        ON sentinel_symbols (organization_id, repo, ref);
+
+      -- Definition-only fast path — most "Go to definition" queries.
+      CREATE INDEX IF NOT EXISTS idx_sentinel_symbols_definitions
+        ON sentinel_symbols (organization_id, symbol_id)
+        WHERE is_definition = true;
+    `,
+  },
 ];
 
 /**

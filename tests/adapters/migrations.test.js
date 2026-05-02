@@ -33,6 +33,7 @@ function makeAllAppliedPool() {
             { version: 4 },
             { version: 5 }, // finding_schema_v2
             { version: 6 }, // multi_tenant_via_identify
+            { version: 7 }, // cross_repo_symbol_index
           ],
         };
       }
