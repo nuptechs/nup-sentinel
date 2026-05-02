@@ -27,7 +27,7 @@ export class Integration {
    * Called when the integration is added to a Sentinel instance.
    * @param {IntegrationContext} context
    */
-  setup(context) {
+  setup(_context) {
     throw new Error('Integration.setup() must be overridden');
   }
 

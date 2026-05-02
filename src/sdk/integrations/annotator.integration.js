@@ -1077,7 +1077,7 @@ export class AnnotatorIntegration extends Integration {
         videoSize: this._videoBlob?.size || 0,
       };
 
-      const finding = await this._reporter.reportFinding({
+      await this._reporter.reportFinding({
         annotation,
         browserContext: {
           userAgent: navigator.userAgent,

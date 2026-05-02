@@ -59,15 +59,26 @@ export class FieldDeathOrchestrator {
    * }>}
    */
   async runFromSources(args) {
-    const projectId = String(args?.projectId || '').trim();
+    // Strict type validation up front. Coercing arrays/objects via String()
+    // accepts payloads like `[uuid]` → `'uuid'` and creates silent
+    // confusion downstream. Reject non-string identifiers loudly.
+    const projectId =
+      typeof args?.projectId === 'string' ? args.projectId.trim() : '';
+    const organizationId =
+      typeof args?.organizationId === 'string' ? args.organizationId.trim() : '';
+    // manifestProjectId is the only identifier allowed to come as number
+    // OR string (legacy auto-increment id from `nup-sentinel-manifest`).
+    const manifestProjectIdRaw = args?.manifestProjectId;
     const manifestProjectId =
-      args?.manifestProjectId !== undefined && args?.manifestProjectId !== null
-        ? String(args.manifestProjectId).trim()
-        : '';
-    const organizationId = String(args?.organizationId || '').trim();
-    if (!projectId) throw new Error('projectId is required');
-    if (!manifestProjectId) throw new Error('manifestProjectId is required');
-    if (!organizationId) throw new Error('organizationId is required');
+      typeof manifestProjectIdRaw === 'string'
+        ? manifestProjectIdRaw.trim()
+        : typeof manifestProjectIdRaw === 'number' && Number.isFinite(manifestProjectIdRaw)
+          ? String(manifestProjectIdRaw)
+          : '';
+
+    if (!projectId) throw new Error('projectId (string) is required');
+    if (!manifestProjectId) throw new Error('manifestProjectId (string|number) is required');
+    if (!organizationId) throw new Error('organizationId (string) is required');
 
     const probeSessionTag = args?.probeSessionTag || `sentinel:project:${projectId}`;
     const windowMs = typeof args?.windowMs === 'number' && args.windowMs > 0 ? args.windowMs : DEFAULT_WINDOW_MS;
