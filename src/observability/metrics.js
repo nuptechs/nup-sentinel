@@ -106,6 +106,13 @@ export const coldRoutesOrchestratorRunsTotal = new Counter({
   registers: [registry],
 });
 
+export const flagDeadBranchOrchestratorRunsTotal = new Counter({
+  name: 'sentinel_flag_dead_branch_orchestrator_runs_total',
+  help: 'FlagDeadBranchOrchestrator.runFromSources outcomes',
+  labelNames: ['outcome'], // outcome: emitted|no_findings|dry_run|inventory_failed|extractor_failed|inventory_unconfigured
+  registers: [registry],
+});
+
 // ── Cron scheduler ──
 export const cronJobRunsTotal = new Counter({
   name: 'sentinel_cron_job_runs_total',

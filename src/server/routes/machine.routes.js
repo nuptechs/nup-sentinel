@@ -17,6 +17,11 @@
 //       scheduler, see server/scheduler.js).
 //   POST /api/m2m/cold-routes/run-from-sources  — Onda 2 prep (Triple-orphan);
 //       delegates to ColdRoutesOrchestrator.
+//   POST /api/m2m/flag-dead-branch/run-from-sources — Onda 3 (eixos I+O);
+//       delegates to FlagDeadBranchOrchestrator. Body accepts either
+//       `files[{relativePath,content}]` (regex extractor scans them) or
+//       `flagBranches[{flagKey,file,line,kind}]` (pre-extracted, e.g.
+//       from an AST adapter).
 //   POST /api/m2m/semantic/embed                — Onda 6 (ADR 0007).
 //
 // Refs: ADR 0003 §5 (apikey contract), ADR 0006, ADR 0007.
@@ -32,6 +37,7 @@ export function createMachineRoutes({
   embeddingAdapter,
   fieldDeathOrchestrator,
   coldRoutesOrchestrator,
+  flagDeadBranchOrchestrator,
 }) {
   const router = Router();
 
@@ -183,6 +189,53 @@ export function createMachineRoutes({
           manifestProjectId: body.manifestProjectId,
           ...(body.probeSessionTag ? { probeSessionTag: body.probeSessionTag } : {}),
           ...(typeof body.windowMs === 'number' ? { windowMs: body.windowMs } : {}),
+          ...(body.dryRun === true ? { dryRun: true } : {}),
+        });
+      } catch (err) {
+        return res.status(502).json({
+          success: false,
+          error: 'orchestrator_error',
+          message: err?.message || String(err),
+        });
+      }
+      res.json({ success: true, data: result });
+    }),
+  );
+
+  // ── /flag-dead-branch/run-from-sources (delegates to orchestrator) ──
+  router.post(
+    '/flag-dead-branch/run-from-sources',
+    asyncHandler(async (req, res) => {
+      if (!flagDeadBranchOrchestrator) {
+        return res
+          .status(503)
+          .json({ success: false, error: 'flag_dead_branch_orchestrator_unavailable' });
+      }
+      const body = req.body || {};
+      const projectId = String(body.projectId || '').trim();
+      if (!projectId) throw new ValidationError('projectId (string) is required');
+      const resolvedOrgId = resolveOrgId(req, body.organizationId);
+      if (resolvedOrgId.error) return res.status(resolvedOrgId.status).json(resolvedOrgId.error);
+
+      // files[] cap — the extractor itself caps each file at 2MB; this
+      // bounds total request memory. Browser-shaped uploads should never
+      // hit M2M anyway, but cheap to be explicit.
+      if (Array.isArray(body.files) && body.files.length > 5000) {
+        throw new ValidationError('files: max 5000 entries per call');
+      }
+      if (Array.isArray(body.flagBranches) && body.flagBranches.length > 50_000) {
+        throw new ValidationError('flagBranches: max 50000 entries per call');
+      }
+
+      let result;
+      try {
+        result = await flagDeadBranchOrchestrator.runFromSources({
+          projectId,
+          organizationId: resolvedOrgId.id,
+          ...(typeof body.environmentKey === 'string' ? { environmentKey: body.environmentKey } : {}),
+          ...(typeof body.staleAfterDays === 'number' ? { staleAfterDays: body.staleAfterDays } : {}),
+          ...(Array.isArray(body.files) ? { files: body.files } : {}),
+          ...(Array.isArray(body.flagBranches) ? { flagBranches: body.flagBranches } : {}),
           ...(body.dryRun === true ? { dryRun: true } : {}),
         });
       } catch (err) {
