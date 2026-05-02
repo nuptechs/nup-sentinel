@@ -21,6 +21,7 @@ import { createProjectRoutes } from './routes/projects.js';
 import { createProjectCrudRoutes } from './routes/project-crud.routes.js';
 import { createDriftRoutes } from './routes/drift.routes.js';
 import { createMachineRoutes } from './routes/machine.routes.js';
+import { createSymbolRoutes } from './routes/symbols.routes.js';
 import { createWebhookEventRoutes } from './routes/webhook-events.js';
 import { createProbeWebhookRoutes } from './routes/probe-webhooks.js';
 import { createIdentifyWebhookRoutes } from './routes/identify-webhooks.routes.js';
@@ -259,6 +260,11 @@ export function createApp(services, adapters = null) {
   app.use('/api/sessions', createSessionRoutes(services));
   app.use('/api/findings', createFindingRoutes(services));
   app.use('/api/projects', createProjectRoutes(services));
+
+  // Symbol index — cross-repo lookup + SCIP ingest (eixo C). Apikey-auth.
+  if (services?.symbolIndex) {
+    app.use('/api/symbols', createSymbolRoutes({ symbolIndex: services.symbolIndex }));
+  }
 
   // M2M endpoints for emitters (knip, manifest, probe). Apikey-only — no OIDC.
   // Tenant scope is enforced from the apikey binding (req.apiKeyOrganizationId)

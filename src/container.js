@@ -23,6 +23,8 @@ import { NoopCaptureAdapter } from './adapters/capture/noop.adapter.js';
 import { OpenAIEmbeddingAdapter } from './adapters/embedding/openai.adapter.js';
 import { GitHubPRAdapter } from './adapters/code-change/github-pr.adapter.js';
 import { NoopCodeChangeAdapter } from './adapters/code-change/noop.adapter.js';
+import { PostgresSymbolIndexAdapter } from './adapters/symbol-index/postgres.adapter.js';
+import { NoopSymbolIndexAdapter } from './adapters/symbol-index/noop.adapter.js';
 import { IdentifyClient } from './integrations/identify/identify.client.js';
 
 import { SessionService } from './core/services/session.service.js';
@@ -115,6 +117,7 @@ async function buildAdapters() {
     issueTracker: buildIssueTracker(),
     embedding: buildEmbedding(),
     codeChange: buildCodeChange(),
+    symbolIndex: buildSymbolIndex(pool),
   };
 }
 
@@ -125,6 +128,15 @@ function buildCodeChange() {
   }
   console.log('[Sentinel] CodeChange: GitHub PR adapter');
   return new GitHubPRAdapter();
+}
+
+function buildSymbolIndex(pool) {
+  if (!pool) {
+    console.log('[Sentinel] SymbolIndex: not configured (memory-mode — no pg.Pool)');
+    return new NoopSymbolIndexAdapter();
+  }
+  console.log('[Sentinel] SymbolIndex: Postgres');
+  return new PostgresSymbolIndexAdapter({ pool });
 }
 
 function buildEmbedding() {
@@ -200,6 +212,11 @@ function buildServices(adapters) {
     // It's adapter-shaped (port + adapter), so no service wraps it yet —
     // the route checks `isConfigured()` and short-circuits when absent.
     codeChange: adapters.codeChange,
+    // SymbolIndex consumed by routes/symbols.routes.js. Adapter-shaped;
+    // no service wraps it yet (the route enforces tenant scope + calls
+    // ingest/lookup directly). Future SymbolIndexService can move logic
+    // out when query patterns diversify.
+    symbolIndex: adapters.symbolIndex,
   };
 
   // Cross-source orchestrators — wired AFTER all the underlying services
