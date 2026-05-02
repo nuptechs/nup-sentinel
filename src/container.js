@@ -25,6 +25,8 @@ import { GitHubPRAdapter } from './adapters/code-change/github-pr.adapter.js';
 import { NoopCodeChangeAdapter } from './adapters/code-change/noop.adapter.js';
 import { PostgresSymbolIndexAdapter } from './adapters/symbol-index/postgres.adapter.js';
 import { NoopSymbolIndexAdapter } from './adapters/symbol-index/noop.adapter.js';
+import { LaunchDarklyFlagAdapter } from './adapters/flag-inventory/launchdarkly.adapter.js';
+import { NoopFlagInventoryAdapter } from './adapters/flag-inventory/noop.adapter.js';
 import { IdentifyClient } from './integrations/identify/identify.client.js';
 
 import { SessionService } from './core/services/session.service.js';
@@ -41,6 +43,7 @@ import { FieldDeathDetectorService } from './core/services/field-death-detector.
 import { SourceFetcher } from './core/services/orchestrators/source-fetcher.service.js';
 import { FieldDeathOrchestrator } from './core/services/orchestrators/field-death.orchestrator.js';
 import { ColdRoutesOrchestrator } from './core/services/orchestrators/cold-routes.orchestrator.js';
+import { FlagDeadBranchOrchestrator } from './core/services/orchestrators/flag-dead-branch.orchestrator.js';
 
 let _container = null;
 
@@ -118,7 +121,19 @@ async function buildAdapters() {
     embedding: buildEmbedding(),
     codeChange: buildCodeChange(),
     symbolIndex: buildSymbolIndex(pool),
+    flagInventory: buildFlagInventory(),
   };
+}
+
+function buildFlagInventory() {
+  if (process.env.SENTINEL_LAUNCHDARKLY_API_KEY) {
+    console.log(
+      `[Sentinel] FlagInventory: LaunchDarkly (project=${process.env.SENTINEL_LAUNCHDARKLY_PROJECT_KEY || 'default'})`,
+    );
+    return new LaunchDarklyFlagAdapter();
+  }
+  console.log('[Sentinel] FlagInventory: not configured (Noop)');
+  return new NoopFlagInventoryAdapter();
 }
 
 function buildCodeChange() {
@@ -217,6 +232,11 @@ function buildServices(adapters) {
     // ingest/lookup directly). Future SymbolIndexService can move logic
     // out when query patterns diversify.
     symbolIndex: adapters.symbolIndex,
+    // FlagInventory adapter, consumed by FlagDeadBranchOrchestrator. The
+    // detector itself takes flagInventory as a runtime arg (see
+    // FlagDeadBranchDetectorService.run), so the adapter is a peer of the
+    // orchestrator, not of the detector.
+    flagInventory: adapters.flagInventory,
   };
 
   // Cross-source orchestrators — wired AFTER all the underlying services
@@ -236,6 +256,11 @@ function buildServices(adapters) {
     findingService: services.findings,
     sessionService: services.sessions,
     sourceFetcher,
+  });
+  services.flagDeadBranchOrchestrator = new FlagDeadBranchOrchestrator({
+    flagDeadBranchService: services.flagDeadBranch,
+    sessionService: services.sessions,
+    flagInventory: adapters.flagInventory,
   });
 
   return services;
