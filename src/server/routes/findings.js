@@ -202,6 +202,115 @@ export function createFindingRoutes(services) {
     });
   }));
 
+  // POST /api/findings/ingest-sarif — SARIF 2.1.0 ingestion endpoint.
+  //
+  // Accepts a SARIF 2.1.0 log file (CodeQL, Sonar, Snyk, ESLint, Semgrep,
+  // Trivy, Checkov, Bandit — most security/quality scanners emit it
+  // natively). The adapter validates the envelope, translates each
+  // result into a Finding v2 payload, creates one session for the run,
+  // and ingests through the same `findings.create` path as the native
+  // endpoint (so the correlator's dedup-by-symbolRef applies uniformly).
+  //
+  // Body: SARIF 2.1.0 JSON object. Optional control headers/query:
+  //   ?projectId=<uuid>          — required (scoping target)
+  //   ?repo=<git-url>            — embedded in symbolRef.repo
+  //   ?ref=<branch-or-sha>       — embedded in symbolRef.ref
+  //   x-sentinel-default-source  — overrides 'auto_static' assignment
+  //
+  // Tenant scope: same rules as /ingest (apikey-bound org wins; mismatch
+  // → 403; tenant-agnostic key requires explicit organizationId param).
+  router.post('/ingest-sarif', asyncHandler(async (req, res) => {
+    const { translateSarif, validateSarif } = await import('../../integrations/sarif/sarif-ingest.js');
+
+    const projectId = typeof req.query.projectId === 'string' ? req.query.projectId.trim() : '';
+    if (!projectId) throw new ValidationError('projectId query param is required');
+
+    const boundOrgId = req.apiKeyOrganizationId;
+    let resolvedOrgId;
+    if (boundOrgId) {
+      const claimed = typeof req.query.organizationId === 'string' ? req.query.organizationId : null;
+      if (claimed && claimed !== boundOrgId) {
+        return res.status(403).json({
+          success: false,
+          error: 'tenant_scope_violation',
+          message: `organizationId="${claimed}" does not match the API key's bound org="${boundOrgId}"`,
+        });
+      }
+      resolvedOrgId = boundOrgId;
+    } else {
+      const orgFromQuery = typeof req.query.organizationId === 'string' ? req.query.organizationId.trim() : '';
+      if (!orgFromQuery) {
+        throw new ValidationError('organizationId is required when the API key is tenant-agnostic');
+      }
+      resolvedOrgId = orgFromQuery;
+    }
+
+    // Quick-reject malformed SARIF before creating any DB rows.
+    const validationErrors = validateSarif(req.body);
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'invalid_sarif',
+        message: 'SARIF document failed validation',
+        validationErrors,
+      });
+    }
+
+    // Create one session per SARIF run.
+    const session = await services.sessions.create({
+      projectId,
+      userId: 'm2m:sarif-ingest',
+      metadata: {
+        emitter: 'findings/ingest-sarif',
+        organizationId: resolvedOrgId,
+        // First tool name from the document — handy when reviewing audit logs.
+        tool: req.body?.runs?.[0]?.tool?.driver?.name || 'unknown',
+      },
+    });
+
+    const repo = typeof req.query.repo === 'string' ? req.query.repo : undefined;
+    const ref = typeof req.query.ref === 'string' ? req.query.ref : undefined;
+    const defaultSource = typeof req.get?.('x-sentinel-default-source') === 'string'
+      ? req.get('x-sentinel-default-source')
+      : undefined;
+
+    const translated = translateSarif(req.body, {
+      sessionId: session.id,
+      projectId,
+      organizationId: resolvedOrgId,
+      ...(defaultSource ? { defaultSource } : {}),
+      ...(repo ? { repo } : {}),
+      ...(ref ? { ref } : {}),
+    });
+
+    // Push every translated finding through the same create path as the
+    // native ingest endpoint — guarantees correlator dedup runs.
+    const created = [];
+    const ingestErrors = [];
+    for (let i = 0; i < translated.findings.length; i++) {
+      try {
+        const f = await services.findings.create(translated.findings[i]);
+        created.push(f.toJSON());
+      } catch (err) {
+        ingestErrors.push({
+          index: i,
+          message: err?.message || String(err),
+        });
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      data: {
+        sessionId: session.id,
+        stats: translated.stats,
+        acceptedCount: created.length,
+        rejectedCount: ingestErrors.length,
+        rejected: ingestErrors,
+      },
+    });
+  }));
+
   // GET /api/findings/:id — Get finding details
   router.get('/:id', asyncHandler(async (req, res) => {
     const finding = await services.findings.get(req.params.id);
