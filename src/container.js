@@ -21,6 +21,8 @@ import { JiraIssueAdapter } from './adapters/issue-tracker/jira.adapter.js';
 import { NoopIssueTrackerAdapter } from './adapters/issue-tracker/noop.adapter.js';
 import { NoopCaptureAdapter } from './adapters/capture/noop.adapter.js';
 import { OpenAIEmbeddingAdapter } from './adapters/embedding/openai.adapter.js';
+import { GitHubPRAdapter } from './adapters/code-change/github-pr.adapter.js';
+import { NoopCodeChangeAdapter } from './adapters/code-change/noop.adapter.js';
 import { IdentifyClient } from './integrations/identify/identify.client.js';
 
 import { SessionService } from './core/services/session.service.js';
@@ -112,7 +114,17 @@ async function buildAdapters() {
     notification: buildNotification(storage),
     issueTracker: buildIssueTracker(),
     embedding: buildEmbedding(),
+    codeChange: buildCodeChange(),
   };
+}
+
+function buildCodeChange() {
+  if (!process.env.SENTINEL_GITHUB_TOKEN) {
+    console.log('[Sentinel] CodeChange: not configured (SENTINEL_GITHUB_TOKEN missing)');
+    return new NoopCodeChangeAdapter();
+  }
+  console.log('[Sentinel] CodeChange: GitHub PR adapter');
+  return new GitHubPRAdapter();
 }
 
 function buildEmbedding() {
@@ -184,6 +196,10 @@ function buildServices(adapters) {
     // through the service layer.
     trace: adapters.trace,
     analyzer: adapters.analyzer,
+    // CodeChange is consumed directly by the /findings/:id/open-pr route.
+    // It's adapter-shaped (port + adapter), so no service wraps it yet —
+    // the route checks `isConfigured()` and short-circuits when absent.
+    codeChange: adapters.codeChange,
   };
 
   // Cross-source orchestrators — wired AFTER all the underlying services
