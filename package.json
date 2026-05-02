@@ -19,7 +19,7 @@
   "scripts": {
     "dev": "node --watch src/server/index.js",
     "start": "node src/server/index.js",
-    "test": "node --test --test-concurrency=1 tests/**/*.test.js",
+    "test": "node --test --test-concurrency=1 --test-timeout=60000 tests/**/*.test.js",
     "test:unit": "node --test 'tests/**/!(*.integration).test.js'",
     "test:integration": "node --test --test-concurrency=1 tests/integration/**/*.test.js",
     "test:coverage": "node --test --experimental-test-coverage --test-concurrency=1 tests/**/*.test.js",
