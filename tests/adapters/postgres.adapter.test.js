@@ -15,7 +15,31 @@ import { CaptureEvent } from '../../src/core/domain/capture-event.js';
 const DATABASE_URL = process.env.SENTINEL_TEST_DATABASE_URL
   || 'postgresql://easynup:easynup_secret_2024@localhost:5432/sentinel';
 
-describe('PostgresStorageAdapter (real PG)', () => {
+// Probe DB availability at module load (top-level await). When unreachable,
+// the whole suite is skipped via `describe(..., { skip })` — node:test
+// otherwise marks every nested subtest as `cancelled` when `before` errors
+// during setup, which makes the runner exit 1 even with 0 assertion failures.
+const dbAvailable = await (async () => {
+  const probePool = new pg.Pool({
+    connectionString: DATABASE_URL,
+    max: 1,
+    connectionTimeoutMillis: 3_000,
+    idleTimeoutMillis: 500,
+  });
+  try {
+    await probePool.query('SELECT 1');
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await probePool.end().catch(() => {});
+  }
+})();
+
+describe(
+  'PostgresStorageAdapter (real PG)',
+  { skip: dbAvailable ? false : `Postgres unreachable at ${DATABASE_URL.replace(/:[^@]+@/, ':***@')}` },
+  () => {
   let adapter;
   let pool;
 

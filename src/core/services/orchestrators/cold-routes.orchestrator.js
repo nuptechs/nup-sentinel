@@ -45,15 +45,23 @@ export class ColdRoutesOrchestrator {
    * @param {boolean} [args.dryRun]
    */
   async runFromSources(args) {
-    const projectId = String(args?.projectId || '').trim();
+    // Strict type validation; arrays/objects/numbers must NOT be silently
+    // coerced to strings via `String(...)` — that hides type bugs.
+    const projectId =
+      typeof args?.projectId === 'string' ? args.projectId.trim() : '';
+    const organizationId =
+      typeof args?.organizationId === 'string' ? args.organizationId.trim() : '';
+    const manifestProjectIdRaw = args?.manifestProjectId;
     const manifestProjectId =
-      args?.manifestProjectId !== undefined && args?.manifestProjectId !== null
-        ? String(args.manifestProjectId).trim()
-        : '';
-    const organizationId = String(args?.organizationId || '').trim();
-    if (!projectId) throw new Error('projectId is required');
-    if (!manifestProjectId) throw new Error('manifestProjectId is required');
-    if (!organizationId) throw new Error('organizationId is required');
+      typeof manifestProjectIdRaw === 'string'
+        ? manifestProjectIdRaw.trim()
+        : typeof manifestProjectIdRaw === 'number' && Number.isFinite(manifestProjectIdRaw)
+          ? String(manifestProjectIdRaw)
+          : '';
+
+    if (!projectId) throw new Error('projectId (string) is required');
+    if (!manifestProjectId) throw new Error('manifestProjectId (string|number) is required');
+    if (!organizationId) throw new Error('organizationId (string) is required');
 
     const probeSessionTag = args?.probeSessionTag || `sentinel:project:${projectId}`;
     const windowMs = typeof args?.windowMs === 'number' && args.windowMs > 0 ? args.windowMs : DEFAULT_WINDOW_MS;
@@ -100,13 +108,26 @@ export class ColdRoutesOrchestrator {
       }
     }
 
-    // 3. Cross-reference
+    // 3. Cross-reference. Defense-in-depth: even though SourceFetcher's
+    // canonicalizeDeclaredRoutes already drops malformed entries, this
+    // orchestrator must NEVER trust a hypothetical alternative fetcher
+    // adapter (the whole point of the hex port). Guard explicitly.
     const coldRoutes = [];
     const hotRoutes = [];
+    let droppedMalformed = 0;
     for (const r of declaredRoutes) {
+      if (!r || typeof r.method !== 'string' || !r.method || typeof r.path !== 'string' || !r.path) {
+        droppedMalformed++;
+        continue;
+      }
       const key = `${r.method} ${r.path}`;
       if ((hitCounts.get(key) || 0) === 0) coldRoutes.push(r);
       else hotRoutes.push(r);
+    }
+    if (droppedMalformed > 0) {
+      this.log.warn?.(
+        `[cold-routes-orchestrator] dropped ${droppedMalformed} malformed declared route(s) — fetcher contract violation`,
+      );
     }
 
     const sources = {

@@ -199,7 +199,7 @@ export class BatchSender {
       });
       this._onSuccess();
       this.metrics.sent += batch.length;
-    } catch (err) {
+    } catch (_err) {
       this._onFailure();
       // Put events back for retry
       this._unshift(batch);

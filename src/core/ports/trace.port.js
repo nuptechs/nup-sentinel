@@ -85,10 +85,12 @@ export class TracePort {
       if (events.length < limit) events.push(event);
     });
     try {
-      await new Promise((resolve) => {
-        const t = setTimeout(resolve, durationMs);
-        if (typeof t?.unref === 'function') t.unref();
-      });
+      await new Promise((resolve) => setTimeout(resolve, durationMs));
+      // NOTE: do NOT `t.unref()` here. unref'ing the timer means an idle
+      // event loop won't keep the process alive long enough for it to
+      // fire — node:test's worker would exit early and mark the calling
+      // test as `cancelledByParent`. In production, the HTTP server keeps
+      // the loop alive so the timer fires normally.
     } finally {
       try { await unsubscribe?.(); } catch { /* ignore */ }
     }

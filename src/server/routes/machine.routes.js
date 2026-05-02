@@ -29,7 +29,6 @@ import { ValidationError } from '../../core/errors.js';
 export function createMachineRoutes({
   fieldDeathService,
   sessionService,
-  findingService,
   embeddingAdapter,
   fieldDeathOrchestrator,
   coldRoutesOrchestrator,

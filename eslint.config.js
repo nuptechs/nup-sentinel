@@ -27,6 +27,10 @@ const browserGlobals = {
   Blob: 'readonly',
   HTMLElement: 'readonly',
   MutationObserver: 'readonly',
+  Image: 'readonly',
+  performance: 'readonly',
+  MediaRecorder: 'readonly',
+  MediaStream: 'readonly',
 };
 
 export default [

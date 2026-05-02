@@ -214,7 +214,7 @@ export function createHttpProbe(options = {}) {
         signal: controller.signal,
         // INTENTIONALLY no Authorization header — that's the whole probe.
       });
-    } catch (err) {
+    } catch (_err) {
       clearTimeout(timer);
       // Network failure / abort → can't say anything. Skip.
       return null;

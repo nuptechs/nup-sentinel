@@ -13,7 +13,6 @@ import {
   Registry,
   Counter,
   Histogram,
-  Gauge,
   collectDefaultMetrics,
 } from 'prom-client';
 
