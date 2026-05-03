@@ -1,9 +1,10 @@
 # Matriz Competitiva — `nup-sentinel` vs mercado
 
 **Data da pesquisa primária:** 2026-04-28
+**Última sincronização com commits:** 2026-05-03 (HEAD `06f0102`, PR #30)
 **Origem:** sessão de auditoria que comparou 5 ferramentas internas (Codelens, Manifest, Probe, Sentinel, Agente QA) com 8 produtos comerciais lendo docs primárias (não inferência de marketing).
 **Fonte bruta:** transcript da sessão originária da memória `plataforma-code-intel-2026-04-28`.
-**Estado em commits:** Ondas 0–5 entregues (PRs #3, #6, #7, #14, #15). Onda 6 (semantic) pendente.
+**Estado em commits:** Ondas 0–6 entregues (PRs #3, #6, #7, #14, #15, #24). Federação ampliada via SARIF (#27), SCIP (#29), GitHub PR (#28), flag-inventory (#30).
 
 > **Convenção da coluna NuP:** formato `hoje → futuro`. Quando há um valor só, é o mesmo nos dois estados. `✓¹` = parcial/limitado; `✓⁺` = ampliação prevista pra cobrir o eixo + extensão.
 
@@ -15,19 +16,19 @@
 |---|---|---|---|---|---|---|---|---|---|
 | **A.** AST símbolo-nível | ✓ | ✓ | ✓ | ✓ | ❌ | ✓¹ | ✓ | ✓ | **❌ → ✓** ² |
 | **B.** Type checker | ✓ | ? | ✓ | ? | ❌ | ❌ | ? | ✓ | **❌ → ✓** ² |
-| **C.** Cross-repo symbol graph | ❌ | ✓ | ❌ | ? | ? | ❌ | ❌ | ? | **❌¹ → ✓** ³ |
+| **C.** Cross-repo symbol graph | ❌ | ✓ | ❌ | ? | ? | ❌ | ❌ | ? | **✓ → ✓** ³ |
 | **D1.** Arquivos órfãos | ? | ? | ? | ❌ | ❌ | ❌ | ❌ | ✓ | **✓¹ → ✓** ⁴ |
-| **D2.** Exports não importados | ? | ? | ❌ | ❌ | ❌ | ❌ | ❌ | ✓ | **❌ → ✓** ⁵ |
-| **D3.** Símbolos não referenciados | ✓ | ? | ✓¹ | ❌ | ✓¹ | ❌ | ? | ✓ | **❌ → ✓** ⁵ |
+| **D2.** Exports não importados | ? | ? | ❌ | ❌ | ❌ | ❌ | ❌ | ✓ | **✓¹ → ✓** ⁵ |
+| **D3.** Símbolos não referenciados | ✓ | ? | ✓¹ | ❌ | ✓¹ | ❌ | ? | ✓ | **✓¹ → ✓** ⁵ |
 | **D4.** Branches mortos | ✓ | ❌ | ✓ | ❌ | ? | ✓ | ✓ | ❌ | **❌ → ✓** ² |
-| **D5.** Tipos não instanciados | ? | ? | ❌ | ❌ | ✓¹ | ❌ | ❌ | ✓ | **❌ → ✓** ⁵ |
-| **D6.** Deps `package.json` | ✓ | ? | ❌ | ✓ | ❌ | ❌ | ❌ | ✓ | **❌ → ✓** ⁵ |
+| **D5.** Tipos não instanciados | ? | ? | ❌ | ❌ | ✓¹ | ❌ | ❌ | ✓ | **✓¹ → ✓** ⁵ |
+| **D6.** Deps `package.json` | ✓ | ? | ❌ | ✓ | ❌ | ❌ | ❌ | ✓ | **✓¹ → ✓** ⁵ |
 | **E.** Reachability estática | ✓ | ? | ✓¹ | ✓ | ❌ | ✓¹ | ✓ | ✓ | **❌ → ✓** ² |
 | **F.** Reachability dinâmica | ❌ | ❌ | ❌ | ❌ | ✓¹ | ✓ | ❌ | ❌ | **✓¹ → ✓** ⁶ |
 | **G.** Runtime ↔ código | ❌ | ❌ | ❌ | ?¹ | ✓ | ✓ | ❌ | ❌ | **✓¹ → ✓** ⁶ |
 | **H.** Permission drift | ?¹ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | **✓ → ✓⁺** ⁷ |
-| **I.** Feature flag state correlation | ? | ❌ | ❌ | ❌ | ✓¹ | ✓¹ | ❌ | ❌ | **❌ → ✓⁺** ⁸ |
-| **J.** AI fix / PR | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ❌ | **✓¹ → ✓** ⁹ |
+| **I.** Feature flag state correlation | ? | ❌ | ❌ | ❌ | ✓¹ | ✓¹ | ❌ | ❌ | **✓ → ✓⁺** ⁸ |
+| **J.** AI fix / PR | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ❌ | **✓ → ✓** ⁹ |
 | **K.** AI test generation | ❌ | ✓ | ❌ | ? | ✓ | ✓¹ | ❌ | ❌ | **✓ → ✓⁺** ¹⁰ |
 | **L.** Self-hosted | ✓ | ✓ | ✓ | ? | ✓¹ | ❌ | ? | ✓ | **✓ → ✓** |
 | **M.** TS/JS first-class | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | **✓ → ✓** |
@@ -52,41 +53,44 @@ Nenhum dos 8 concorrentes pesquisados cobre.
 
 ### Estado HOJE (verificado lendo código)
 
-1. **A/B (hoje ❌)** — Codelens usa `ts.preProcessFile` (só linhas de import, não AST tipado). Manifest tem AST parcial em frontend mas só symbol table por arquivo. Nenhum tem type checker integrado.
-2. **C (hoje ❌)** — Manifest cruza frontend↔backend mas não é cross-repo genérico. Codelens resolve workspaces de monorepo mas não atravessa repos git separados.
+1. **A/B (hoje ❌)** — Codelens usa `ts.preProcessFile` (só linhas de import, não AST tipado). Manifest tem AST parcial em frontend mas só symbol table por arquivo. Nenhum tem type checker integrado. **Pendência: Codelens AST upgrade.**
+2. **C (hoje ✓)** — `POST /api/symbols/ingest-scip` (PR #29) ingere SCIP Index gerado por scip-typescript/Sourcegraph. Symbol graph cross-repo via SCIP é o mesmo formato do Sourcegraph.
 3. **D1 (hoje ✓¹)** — Codelens tem grafo direcionado com `incomingOf(id)`. Falta filtrar `incoming===0 && !isEntryPoint` e renderizar.
-4. **F/G (hoje ✓¹)** — Probe captura runtime mas ad-hoc — sem retenção long-term, sem agregação, correlação por window temporal + URL match (não source-map).
-5. **H (hoje ✓)** — Manifest **já é** o core de permission drift via `SecurityOmissionEngine`. Diferenciador único do produto.
-6. **J (hoje ✓¹)** — Sentinel tem `CorrectionService` que gera diff via Claude. **Não abre PR**. Futuro fecha o loop.
-7. **K (hoje ✓)** — Agente QA gera testes em 14 dimensões. Futuro `⁺` = modo confirmador adversarial (Onda 4, já mergeada — ADR 0005).
+4. **D2/D3/D5/D6 (hoje ✓¹)** — `POST /api/findings/ingest-sarif` (PR #27) ingere SARIF 2.1.0. knip/CodeQL/ts-prune/depcheck plugam via SARIF. Pleno (✓) quando o orquestrador rodar knip por padrão no Codelens.
+5. **F/G (hoje ✓¹)** — Probe captura runtime mas ad-hoc — sem retenção long-term, sem agregação, correlação por window temporal + URL match (não source-map). PRs #8/#9 do probe expõem `observed-fields` e `runtime-hits` para alimentar Q e N respectivamente.
+6. **H (hoje ✓)** — Manifest **já é** o core de permission drift via `SecurityOmissionEngine`. Diferenciador único do produto.
+7. **I (hoje ✓)** — `FlagInventoryPort` + `LaunchDarklyAdapter` (PR #30). Cruza com AST do branch para detector O.
+8. **J (hoje ✓)** — `GitHubPRAdapter` + `POST /api/findings/:id/open-pr` (PR #28) — fecha o loop diff→PR direto pelo GitHub API.
+9. **K (hoje ✓)** — Agente QA gera testes em 14 dimensões. Futuro `⁺` = modo confirmador adversarial (Onda 4, já mergeada — ADR 0005).
 
 ### Estado FUTURO (após implementação completa)
 
-8. **A/B futuro ✓** — Codelens migra de `preProcessFile` para TypeScript Compiler API + LanguageService (mesma engine que knip usa).
-9. **C futuro ✓** — Codelens estende `PathResolver` pra atravessar repos via `nupidentity-client-manifest` + symbol graph cross-repo.
-10. **D2/D3/D5/D6 futuro ✓** — via **adapter knip embutido no Codelens**. Codelens executa knip e converte saída em findings `dead_code` pro Sentinel. Não reinventa.
-11. **N (Vácuo 1+2)** — Sentinel correlaciona findings de Manifest (rota declarada) + Probe (0 hits) + Identify (0 roles) → único finding `triple_orphan`. **Entregue na Onda 2** (PR #6).
-12. **O (Vácuo 3)** — Codelens (AST do branch) + Manifest (flag declarada no código) + flag store (state atual) → finding `flag_dead_branch`. **Entregue na Onda 3** (PR #7) — ver [ADR 0004](adr/0004-flag-dead-branch-detector.md).
-13. **P (Vácuo 4)** — Agente QA recebe candidato a remoção, gera teste E2E que tenta exercitá-lo. Falha = morto confirmado. Sucesso = falso positivo. **Entregue na Onda 4** (PR #14) — ver [ADR 0005](adr/0005-adversarial-confirmer.md).
-14. **Q (Vácuo 5)** — Probe agrega payloads e expõe histograma de campos. Sentinel cruza com schema declarado no Manifest → `field_death`. **Entregue na Onda 5** (PR #15) — ver [ADR 0006](adr/0006-field-death-detector.md).
-15. **R** — Sentinel hoje aceita findings das ferramentas próprias. Futuro = aceita externas (knip, ts-prune, depcheck, ESLint, CodeQL via SARIF) com schema unificado via [Finding v2](adr/0002-finding-schema-v2.md).
+10. **A/B/E/D4 futuro ✓** — Codelens migra de `preProcessFile` para TypeScript Compiler API + LanguageService (mesma engine que knip usa). Habilita reachability estática (E) e branch deadness (D4) nativos no Codelens — hoje só dá pra obter via SARIF de Sonar/CodeQL.
+11. **D1 futuro ✓** — UI renderiza arquivos órfãos do grafo já existente.
+12. **D2/D3/D5/D6 plenificação** — orquestrador roda knip por padrão e converte saída pra `findings/ingest-sarif`. Hoje o canal está aberto (PR #27); falta o auto-orquestrador.
+13. **N (Vácuo 1+2)** — Sentinel correlaciona findings de Manifest (rota declarada) + Probe (0 hits) + Identify (0 roles) → único finding `triple_orphan`. **Entregue na Onda 2** (PR #6).
+14. **O (Vácuo 3)** — Codelens (AST do branch) + Manifest (flag declarada no código) + flag store (state atual via `FlagInventoryPort`) → finding `flag_dead_branch`. **Entregue na Onda 3** (PR #7), **ampliado na PR #30** — ver [ADR 0004](adr/0004-flag-dead-branch-detector.md).
+15. **P (Vácuo 4)** — Agente QA recebe candidato a remoção, gera teste E2E que tenta exercitá-lo. Falha = morto confirmado. Sucesso = falso positivo. **Entregue na Onda 4** (PR #14) — ver [ADR 0005](adr/0005-adversarial-confirmer.md).
+16. **Q (Vácuo 5)** — Probe agrega payloads e expõe histograma de campos via `GET /api/sessions/:id/observed-fields`. Sentinel cruza com schema declarado no Manifest → `field_death`. **Entregue na Onda 5** (PR #15) — ver [ADR 0006](adr/0006-field-death-detector.md).
+17. **R** — Sentinel aceita findings das ferramentas próprias + ingestores externos: SARIF (#27), SCIP (#29), Probe webhooks. Schema unificado via [Finding v2](adr/0002-finding-schema-v2.md). **Onda 6** (PR #24) amplifica via dedup semântico — ver [ADR 0007](adr/0007-semantic-engine.md).
 
 ---
 
 ## 4. Resumo numérico
 
-Das **18 capacidades de mercado + 5 vácuos = 23 eixos**:
+Das **18 capacidades de mercado + 5 vácuos = 23 eixos** (atualizado 2026-05-03):
 
 | Categoria | Quantidade | Quais |
 |---|---|---|
-| **Cobre hoje (✓)** | **6** | H (permission drift), J (AI fix parcial), K (AI test), L (self-hosted), M (TS/JS), R (federação parcial) |
-| **Cobre parcial hoje (✓¹)** | **3** | D1 (órfãos faltando UI), F (runtime ad-hoc), G (correlação fraca) |
-| **Cobertura HOJE** | **9/23 (39%)** | — |
+| **Cobre hoje pleno (✓)** | **12** | C (SCIP), H (permission drift), I (flag inventory), J (PR adapter), K (AI test), L (self-hosted), M (TS/JS), R (federação), N, O, P, Q |
+| **Cobre parcial hoje (✓¹)** | **7** | D1 (órfãos faltando UI), D2/D3/D5/D6 (via SARIF, sem auto-orquestração), F (runtime ad-hoc), G (correlação fraca) |
+| **Cobertura HOJE** | **19/23 (83%)** — 12 plenos + 7 parciais | — |
+| **❌ ainda** | **4** | A (AST símbolo-nível), B (type checker), D4 (branches mortos), E (reachability estática) — todos dependem do Codelens AST upgrade |
 | **Cobertura FUTURO** | **23/23 (100%)** | 18 mercado + 5 vácuos exclusivos |
 
-**Pontos fortes reais hoje:** **H** (permission drift — diferenciador único de mercado) e **R** (federação parcial).
+**Pontos fortes reais hoje:** os 5 vácuos exclusivos (H/N/O/P/Q + R federação) **todos plenos** + cross-repo (C) e PR loop (J).
 
-**Pontos cegos reais hoje:** toda análise estática profunda (A, B, C, E, D2-D6) e os 4 vácuos novos (N, O, P, Q) — todos endereçados pelas Ondas 1-5 já mergeadas.
+**Pontos cegos reais hoje:** análise estática profunda nativa (A, B, D4, E) — bloqueio único = Codelens AST upgrade. D2/D3/D5/D6 já plugáveis via SARIF, falta auto-orquestrar knip.
 
 ---
 
@@ -100,8 +104,11 @@ Das **18 capacidades de mercado + 5 vácuos = 23 eixos**:
 | 4 | P (Adversarial) | 4 | #14 | [0005](adr/0005-adversarial-confirmer.md) | `AdversarialConfirmerService` + `HttpProbe` |
 | 5 | Q (Field death) | 5 | #15 | [0006](adr/0006-field-death-detector.md) | `FieldDeathDetectorService` |
 | — | R (Federação) | 0 | — | [0002](adr/0002-finding-schema-v2.md) | Schema Finding v2 + `/api/findings/ingest` |
-
-Onda 6 (`nup-sentinel-semantic` — embeddings + dedup semântico) ainda não iniciada. Não é vácuo de mercado, é amplificador de R (federação melhor com merge por similaridade).
+| — | R (amplificador semântico) | 6 | #24 | [0007](adr/0007-semantic-engine.md) | `EmbeddingPort` + `OpenAIEmbeddingAdapter` + `/api/m2m/semantic/embed` |
+| — | C (cross-repo) | — | #29 | — | `SCIP ingest` + `/api/symbols/ingest-scip` |
+| — | I (flag inventory) | — | #30 | — | `FlagInventoryPort` + `LaunchDarklyAdapter` |
+| — | J (PR loop pleno) | — | #28 | — | `GitHubPRAdapter` + `/api/findings/:id/open-pr` |
+| — | D2/D3/D5/D6 (SARIF) | — | #27 | — | `SARIFIngestService` + `/api/findings/ingest-sarif` |
 
 ---
 
