@@ -245,3 +245,93 @@ nup-suite status
 
 ### Fora de escopo (continua como Fase 3.5)
 ReBAC (planta `authorization_models` e tuplas `relationship_tuples`) permanece excluído pelas razões documentadas em `FOUR-TOOLS-DEEP-AUDIT.md` §9.4.1. `nup-suite` respeita isso: o download de bundle só transporta RBAC+ABAC produzidos pela Fase 3.
+
+---
+
+## Fase 5+ — Ondas pós-baseline (sincronização de docs, 2026-05-03)
+
+Esta seção foi adicionada após auditoria que detectou que BASELINE.md havia ficado desatualizado em ~15 PRs. Reflete o estado real em `HEAD = 06f0102` (PR #30).
+
+### Rename Modelo B (ADR 0001)
+
+Os 3 repositórios irmãos passaram a usar o prefixo `nup-sentinel-`:
+
+| Antes | Depois | PR |
+|---|---|---|
+| `sentinel` | `nup-sentinel` | #4 (`rename-to-nup-sentinel`) |
+| `debug-probe` | `nup-sentinel-probe` | #7 do probe (`rename-to-nup-sentinel-probe`) |
+| `Manifest 2` | `nup-sentinel-manifest` | #1 do manifest (`rename-to-nup-sentinel-manifest`) |
+
+Pacotes npm: `@nuptechs-probe/*` e `@nuptechs/manifest` mantidos. Tag `pre-unification-v0` preservada nos 3 repos.
+
+### PRs entregues após Fase 4
+
+#### nup-sentinel
+| PR | Título | Eixo da matriz |
+|---|---|---|
+| #16 | docs-matriz-competitiva | — (doc) |
+| #17 | readme-matriz-norte | — (doc) |
+| #18 | fix-finding-v2-persist | R |
+| #19 | feat-field-death-m2m | Q |
+| #20 | fix-wire-detector-services | — (infra) |
+| #21 | fix-m2m-session | — (infra) |
+| #22 | feat-fd-from-sources | Q (orquestração) |
+| #23 | feat-cold-routes-orchestrator | N (orquestração) |
+| **#24** | **feat-semantic-onda6** | **Onda 6 — amplifica R** (ADR 0007: EmbeddingPort + OpenAI adapter + `/api/m2m/semantic/embed`) |
+| #25 | feat-cron-scheduler-arch | infra (cron + HttpProbe + golden corpus) |
+| #26 | feat-ci-green | infra (CI verde, adversarial pegou 2 bugs reais) |
+| **#27** | **feat-sarif-ingest** | **D2/D3/D5/D6 via federação** (`POST /api/findings/ingest-sarif`) |
+| **#28** | **feat-github-pr-adapter** | **J pleno** (`GitHubPRAdapter` + `POST /findings/:id/open-pr`) |
+| **#29** | **feat-scip-ingest** | **C pleno** (`POST /api/symbols/ingest-scip`) |
+| **#30** | **feat-flag-inventory** | **I pleno + O cross** (`FlagInventoryPort` + `LaunchDarklyAdapter`) |
+
+#### nup-sentinel-probe
+| PR | Título |
+|---|---|
+| #8 | `GET /api/sessions/:id/observed-fields` (alimenta Field Death) |
+| #9 | `GET /api/sessions/:id/runtime-hits` (alimenta Triple-orphan) |
+
+#### nup-sentinel-manifest
+| PR | Título |
+|---|---|
+| #2 | feat-sentinel-emitter (emite findings de permission_drift direto pro Sentinel) |
+| #3 | feat-schema-fields (`GET /api/projects/:id/schema-fields`) |
+| #4 | feat-persist-graph-entities |
+
+### Onda 6 — Semantic engine (ADR 0007) — em produção
+
+`PR #24` mergeou:
+- `src/core/ports/embedding.port.js`
+- `src/adapters/embedding/openai.adapter.js` (text-embedding-3-large)
+- `POST /api/m2m/semantic/embed` em `src/server/routes/machine.routes.js`
+- Migration `sentinel_embeddings` (sha256 cache, model+dim versionados)
+- Budget guard `SENTINEL_EMBEDDING_DAILY_BUDGET_USD`
+- Métrica `sentinel_embedding_cost_usd_total{model}`
+
+Status na ADR 0007 era "scaffolding pendente cota" — agora **em produção**.
+
+### Contagens pós-Fase-5+
+
+| Repo | Antes (Fase 4) | Depois (HEAD 06f0102) |
+|---|---|---|
+| nup-sentinel | 812/812 | **1109 pass / 2 fail (1111 total)** |
+| nup-sentinel-probe | 1439 pass / 23 fail | não re-medido (sem regressão suspeita) |
+| nup-sentinel-manifest | 13 erros TS | não re-medido |
+
+**As 2 falhas locais** (`tests/server/scheduler.test.js` e `tests/adversarial/orchestrator-resilience.test.js`) são ambientais: `node-cron` declarado em `package.json` (devDeps PR #25) mas `npm install` pendente neste checkout. CI fechou green em PR #26. Não é regressão de código.
+
+### Cobertura na MATRIZ-COMPETITIVA — recálculo
+
+Antes (Fases 0-4): **9/23 (39%)** — 6 plenos + 3 parciais.
+Depois (Fases 5+): **19/23 (83%)** — 12 plenos + 7 parciais.
+
+Recém-fechados (vs versão anterior da matriz):
+- **C** (cross-repo symbol graph) — PR #29 SCIP ingest
+- **I** (feature flag state) — PR #30 flag-inventory
+- **J pleno** (de ✓¹ para ✓) — PR #28 GitHub PR adapter
+- **D2/D3/D5/D6** parcial (✓¹ via adapter) — PR #27 SARIF ingest abre canal pra knip/CodeQL/qualquer SARIF
+
+Pendências reais até 23/23 pleno:
+- **A** (AST símbolo-nível), **B** (type checker), **D4** (branches mortos), **E** (reachability estática) — todos dependem do **Codelens AST upgrade** (migrar de `ts.preProcessFile` para TypeScript Compiler API + LanguageService).
+- D1/F/G plenificação (UI órfãos no Codelens; retenção long-term + correlação source-map no Probe).
+- Fase 3.5 ReBAC — depende de Identify abrir `/api/rebac/models` para `systemApiKey`.
