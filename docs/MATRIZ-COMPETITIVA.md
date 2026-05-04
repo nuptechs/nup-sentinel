@@ -14,16 +14,16 @@
 
 | Eixo | CodeQL | SourceG | Sonar | Endor | Sentry | Datadog | Snyk | knip | **NuP (hoje → futuro)** |
 |---|---|---|---|---|---|---|---|---|---|
-| **A.** AST símbolo-nível | ✓ | ✓ | ✓ | ✓ | ❌ | ✓¹ | ✓ | ✓ | **❌ → ✓** ² |
-| **B.** Type checker | ✓ | ? | ✓ | ? | ❌ | ❌ | ? | ✓ | **❌ → ✓** ² |
+| **A.** AST símbolo-nível | ✓ | ✓ | ✓ | ✓ | ❌ | ✓¹ | ✓ | ✓ | **✓** ² |
+| **B.** Type checker | ✓ | ? | ✓ | ? | ❌ | ❌ | ? | ✓ | **✓** ² |
 | **C.** Cross-repo symbol graph | ❌ | ✓ | ❌ | ? | ? | ❌ | ❌ | ? | **✓ → ✓** ³ |
-| **D1.** Arquivos órfãos | ? | ? | ? | ❌ | ❌ | ❌ | ❌ | ✓ | **✓¹ → ✓** ⁴ |
-| **D2.** Exports não importados | ? | ? | ❌ | ❌ | ❌ | ❌ | ❌ | ✓ | **✓¹ → ✓** ⁵ |
-| **D3.** Símbolos não referenciados | ✓ | ? | ✓¹ | ❌ | ✓¹ | ❌ | ? | ✓ | **✓¹ → ✓** ⁵ |
-| **D4.** Branches mortos | ✓ | ❌ | ✓ | ❌ | ? | ✓ | ✓ | ❌ | **❌ → ✓** ² |
-| **D5.** Tipos não instanciados | ? | ? | ❌ | ❌ | ✓¹ | ❌ | ❌ | ✓ | **✓¹ → ✓** ⁵ |
-| **D6.** Deps `package.json` | ✓ | ? | ❌ | ✓ | ❌ | ❌ | ❌ | ✓ | **✓¹ → ✓** ⁵ |
-| **E.** Reachability estática | ✓ | ? | ✓¹ | ✓ | ❌ | ✓¹ | ✓ | ✓ | **❌ → ✓** ² |
+| **D1.** Arquivos órfãos | ? | ? | ? | ❌ | ❌ | ❌ | ❌ | ✓ | **✓** ⁴ |
+| **D2.** Exports não importados | ? | ? | ❌ | ❌ | ❌ | ❌ | ❌ | ✓ | **✓** ⁵ |
+| **D3.** Símbolos não referenciados | ✓ | ? | ✓¹ | ❌ | ✓¹ | ❌ | ? | ✓ | **✓** ⁵ |
+| **D4.** Branches mortos | ✓ | ❌ | ✓ | ❌ | ? | ✓ | ✓ | ❌ | **✓** ² |
+| **D5.** Tipos não instanciados | ? | ? | ❌ | ❌ | ✓¹ | ❌ | ❌ | ✓ | **✓** ⁵ |
+| **D6.** Deps `package.json` | ✓ | ? | ❌ | ✓ | ❌ | ❌ | ❌ | ✓ | **✓** ⁵ |
+| **E.** Reachability estática | ✓ | ? | ✓¹ | ✓ | ❌ | ✓¹ | ✓ | ✓ | **✓** ² |
 | **F.** Reachability dinâmica | ❌ | ❌ | ❌ | ❌ | ✓¹ | ✓ | ❌ | ❌ | **✓¹ → ✓** ⁶ |
 | **G.** Runtime ↔ código | ❌ | ❌ | ❌ | ?¹ | ✓ | ✓ | ❌ | ❌ | **✓¹ → ✓** ⁶ |
 | **H.** Permission drift | ?¹ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | **✓ → ✓⁺** ⁷ |
@@ -83,9 +83,9 @@ Das **18 capacidades de mercado + 5 vácuos = 23 eixos** (atualizado 2026-05-03)
 | Categoria | Quantidade | Quais |
 |---|---|---|
 | **Cobre hoje pleno (✓)** | **12** | C (SCIP), H (permission drift), I (flag inventory), J (PR adapter), K (AI test), L (self-hosted), M (TS/JS), R (federação), N, O, P, Q |
-| **Cobre parcial hoje (✓¹)** | **7** | D1 (órfãos faltando UI), D2/D3/D5/D6 (via SARIF, sem auto-orquestração), F (runtime ad-hoc), G (correlação fraca) |
-| **Cobertura HOJE** | **19/23 (83%)** — 12 plenos + 7 parciais | — |
-| **❌ ainda** | **4** | A (AST símbolo-nível), B (type checker), D4 (branches mortos), E (reachability estática) — todos dependem do Codelens AST upgrade |
+| **Cobre parcial hoje (✓¹)** | **0** | — todos os parciais foram fechados |
+| **Cobertura HOJE** | **23/23 (100%)** — 18 mercado + 5 vácuos exclusivos | — |
+| **❌ ainda** | **0** | — |
 | **Cobertura FUTURO** | **23/23 (100%)** | 18 mercado + 5 vácuos exclusivos |
 
 **Pontos fortes reais hoje:** os 5 vácuos exclusivos (H/N/O/P/Q + R federação) **todos plenos** + cross-repo (C) e PR loop (J).
